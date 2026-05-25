@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.app.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rewriteRelativeImportExtensions": false,
+    "composite": false,
+    "rootDir": ".",
+    "sourceMap": false,
+    "tsBuildInfoFile": "node_modules/.cache/tsconfig.test.tsbuildinfo"
+  },
+  "include": ["test/**/*"],
+  "references": [{ "path": "./tsconfig.app.json" }]
+}

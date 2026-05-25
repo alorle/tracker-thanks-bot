@@ -1,0 +1,8 @@
+{
+  "sites": [
+    {
+      "id": "example",
+      "base_url": "https://tracker.example.com"
+    }
+  ]
+}
