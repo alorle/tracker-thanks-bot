@@ -1,4 +1,4 @@
-FROM node:24.16.0-bookworm-slim AS builder
+FROM node:26.2.0-bookworm-slim AS builder
 
 WORKDIR /app
 
@@ -9,7 +9,7 @@ COPY src/ src/
 RUN npm run build
 
 
-FROM node:24.16.0-bookworm-slim AS deps
+FROM node:26.2.0-bookworm-slim AS deps
 
 WORKDIR /app
 
@@ -17,7 +17,7 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --no-audit --no-fund --ignore-scripts
 
 
-FROM node:24.16.0-bookworm-slim
+FROM node:26.2.0-bookworm-slim
 
 LABEL org.opencontainers.image.title="tracker-thanks-bot" \
       org.opencontainers.image.description="Auto-thanks bot for private trackers, driven by Radarr/Sonarr webhooks." \
