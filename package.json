@@ -1,6 +1,6 @@
 {
   "name": "tracker-thanks-bot",
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "engines": {
     "node": ">=24.16.0"
