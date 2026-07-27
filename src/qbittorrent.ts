@@ -14,8 +14,7 @@ type TorrentInfo = {
 };
 
 type QBittorrentCredentials =
-  | { mode: "apikey"; apiKey: string }
-  | { mode: "cookie"; username: string; password: string };
+  { mode: "apikey"; apiKey: string } | { mode: "cookie"; username: string; password: string };
 
 type QBittorrentConfig = {
   baseUrl: string;
