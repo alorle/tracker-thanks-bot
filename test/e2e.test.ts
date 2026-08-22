@@ -53,7 +53,7 @@ void test("operator config drives the full grab → thanks flow", async (t) => {
   const { loadSites, getSiteCredentials } = await import("../src/config.ts");
   const { parseTorrentComment } = await import("../src/url-parser.ts");
   const { QBittorrentClient } = await import("../src/qbittorrent.ts");
-  const { getPage, enqueue, closeAll } = await import("../src/browser.ts");
+  const { freshPage, enqueue, closeAll } = await import("../src/browser.ts");
   const { thankTorrent } = await import("../src/thanks.ts");
 
   t.after(async () => {
@@ -102,7 +102,7 @@ void test("operator config drives the full grab → thanks flow", async (t) => {
     const { username, password } = getSiteCredentials(site);
 
     await enqueue("fake-site", async () => {
-      const page = await getPage("fake-site");
+      const page = await freshPage("fake-site");
       await thankTorrent(page, trackerTorrentId, username, password, site, "e2e");
     });
 
@@ -127,7 +127,7 @@ void test("operator config drives the full grab → thanks flow", async (t) => {
     // Add a second torrent on the same Site to confirm session reuse.
     const secondTorrentId = "12345";
     await enqueue("fake-site", async () => {
-      const page = await getPage("fake-site");
+      const page = await freshPage("fake-site");
       await thankTorrent(page, secondTorrentId, username, password, site, "e2e");
     });
 
@@ -135,5 +135,37 @@ void test("operator config drives the full grab → thanks flow", async (t) => {
     assert.equal(tracker.clicks.length, 2);
     assert.equal(tracker.clicks[1]?.torrentId, secondTorrentId);
     assert.equal(tracker.clicks[1]?.authed, true);
+  });
+
+  // Regression: a renderer killed mid-scan (the container's memory ceiling is
+  // how it happens in production) used to poison every later torrent, because
+  // the crashed page stayed cached and Playwright cannot revive one. Every
+  // navigation after it failed with "Page crashed" until the process restarted.
+  await t.test("a crashed page does not poison the next torrent", async () => {
+    const sites = loadSites();
+    const site = sites.get("fake-site");
+    assert.ok(site, "expected configured site");
+    const { username, password } = getSiteCredentials(site);
+
+    await enqueue("fake-site", async () => {
+      const page = await freshPage("fake-site");
+      // chrome://crash kills the renderer exactly like the OOM killer does.
+      await page.goto("chrome://crash").catch(() => {});
+    });
+
+    const thirdTorrentId = "24680";
+    await enqueue("fake-site", async () => {
+      const page = await freshPage("fake-site");
+      await thankTorrent(page, thirdTorrentId, username, password, site, "e2e");
+    });
+
+    assert.equal(tracker.clicks.length, 3, "the torrent after a crash must still be thanked");
+    assert.equal(tracker.clicks[2]?.torrentId, thirdTorrentId);
+    assert.equal(
+      tracker.clicks[2]?.authed,
+      true,
+      "the session must survive the crash: it lives in the context, not the page",
+    );
+    assert.equal(tracker.logins.length, 1, "recovering must not require a re-login");
   });
 });

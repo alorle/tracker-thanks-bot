@@ -6,7 +6,7 @@ import {
   type SitesMap,
 } from "./config.ts";
 import { log } from "./log.ts";
-import { getPage, closeAll } from "./browser.ts";
+import { freshPage, closeAll } from "./browser.ts";
 import { thankTorrent } from "./thanks.ts";
 import { startServer } from "./webhook-server.ts";
 import { QBittorrentClient } from "./qbittorrent.ts";
@@ -54,10 +54,10 @@ async function runCli(sites: SitesMap, siteKey: string, torrentIds: string[]): P
 
   log(logPrefix, `Processing ${torrentIds.length} torrent(s)...`);
 
-  const page = await getPage(siteKey);
   try {
     for (const torrentId of torrentIds) {
       try {
+        const page = await freshPage(siteKey);
         await thankTorrent(page, torrentId, username, password, site, logPrefix);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);

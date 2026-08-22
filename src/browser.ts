@@ -14,14 +14,30 @@ export async function getContext(siteKey: string): Promise<BrowserContext> {
   if (!context) {
     const sessionsDir = join(getCacheDir(), "sessions", siteKey);
     context = await chromium.launchPersistentContext(sessionsDir, { headless: true });
+    // Never keep a dead context cached: if the browser process goes away, the
+    // next getContext must launch a new one instead of handing out a corpse.
+    context.once("close", () => contexts.delete(siteKey));
     contexts.set(siteKey, context);
   }
   return context;
 }
 
-export async function getPage(siteKey: string): Promise<Page> {
+/**
+ * Open a page for a site, discarding whatever page earlier work left behind.
+ *
+ * Never reuse a page across torrents. A crashed page cannot be recovered in
+ * Playwright, and the way it crashes here is the kernel OOM-killing its
+ * renderer mid-scan; a cached one then fails every later navigation with
+ * "Page crashed" until the process is restarted. Reusing one also lets
+ * renderer memory grow across hundreds of navigations, which is what pushes
+ * the container into that OOM to begin with. The session lives in the
+ * persistent context, not in the page, so a fresh page is still logged in.
+ */
+export async function freshPage(siteKey: string): Promise<Page> {
   const context = await getContext(siteKey);
-  return context.pages()[0] ?? (await context.newPage());
+  // A crashed page may refuse to close; that must not block its replacement.
+  await Promise.all(context.pages().map((page) => page.close().catch(() => {})));
+  return context.newPage();
 }
 
 /**

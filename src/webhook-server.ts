@@ -4,7 +4,7 @@ import { log } from "./log.ts";
 import { getSiteCredentials, type SitesMap } from "./config.ts";
 import { QBittorrentClient } from "./qbittorrent.ts";
 import { parseTorrentComment } from "./url-parser.ts";
-import { getPage, enqueue, drainAll, closeAll } from "./browser.ts";
+import { freshPage, enqueue, drainAll, closeAll } from "./browser.ts";
 import { thankTorrent } from "./thanks.ts";
 import { registry, webhooksReceived, webhookProcessingDuration } from "./metrics.ts";
 
@@ -138,7 +138,7 @@ async function processGrab(
 
   const logPrefix = `auto-thanks:${site.id}`;
   await enqueue(parsed.siteKey, async () => {
-    const page = await getPage(parsed.siteKey);
+    const page = await freshPage(parsed.siteKey);
     await thankTorrent(
       page,
       parsed.torrentId,
