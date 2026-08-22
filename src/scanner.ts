@@ -1,8 +1,7 @@
 import { log } from "./log.ts";
 import { getSiteCredentials, type SitesMap } from "./config.ts";
 import { parseTorrentComment } from "./url-parser.ts";
-import { freshPage, enqueue } from "./browser.ts";
-import { thankTorrent } from "./thanks.ts";
+import { thank } from "./thank.ts";
 import type { QBittorrentClient } from "./qbittorrent.ts";
 import { scansCompleted, scanDuration, scanTorrentsProcessed } from "./metrics.ts";
 
@@ -56,17 +55,14 @@ export async function scanAllTorrents(sites: SitesMap, qbClient: QBittorrentClie
       }
 
       const logPrefix = `auto-thanks:${site.id}`;
-      await enqueue(parsed.siteKey, async () => {
-        const page = await freshPage(parsed.siteKey);
-        await thankTorrent(
-          page,
-          parsed.torrentId,
-          credentials.username,
-          credentials.password,
-          site,
-          logPrefix,
-        );
-      });
+      await thank(
+        parsed.siteKey,
+        parsed.torrentId,
+        credentials.username,
+        credentials.password,
+        site,
+        logPrefix,
+      );
       thankedCount++;
     } catch (err) {
       log(PREFIX, `Error processing torrent "${torrent.name}": ${String(err)}`);

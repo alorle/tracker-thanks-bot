@@ -6,8 +6,8 @@ import {
   type SitesMap,
 } from "./config.ts";
 import { log } from "./log.ts";
-import { freshPage, closeAll } from "./browser.ts";
-import { thankTorrent } from "./thanks.ts";
+import { closeAll } from "./browser.ts";
+import { thank, getThanksEngine } from "./thank.ts";
 import { startServer } from "./webhook-server.ts";
 import { QBittorrentClient } from "./qbittorrent.ts";
 import { scanAllTorrents } from "./scanner.ts";
@@ -37,6 +37,7 @@ function logConfig(sites: SitesMap): void {
     log("config", `  ${base}_PASSWORD   = ${mask(process.env[`${base}_PASSWORD`])}`);
   }
   log("config", `  CACHE_DIR        = ${process.env.CACHE_DIR ?? "(not set)"}`);
+  log("config", `  THANKS_ENGINE    = ${getThanksEngine()}`);
   log("config", `  SCAN_ENABLED     = ${process.env.SCAN_ENABLED ?? "(not set, default: true)"}`);
   log("config", `  SCAN_HOUR        = ${process.env.SCAN_HOUR ?? "(not set, default: 3)"}`);
   log("config", `  SCAN_ON_START    = ${process.env.SCAN_ON_START ?? "(not set, default: false)"}`);
@@ -57,8 +58,7 @@ async function runCli(sites: SitesMap, siteKey: string, torrentIds: string[]): P
   try {
     for (const torrentId of torrentIds) {
       try {
-        const page = await freshPage(siteKey);
-        await thankTorrent(page, torrentId, username, password, site, logPrefix);
+        await thank(siteKey, torrentId, username, password, site, logPrefix);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         if (message.includes("Login failed")) throw error;

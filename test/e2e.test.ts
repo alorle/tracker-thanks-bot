@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startFakeTracker } from "./fake-tracker.ts";
@@ -54,7 +54,7 @@ void test("operator config drives the full grab → thanks flow", async (t) => {
   const { parseTorrentComment } = await import("../src/url-parser.ts");
   const { QBittorrentClient } = await import("../src/qbittorrent.ts");
   const { freshPage, enqueue, closeAll } = await import("../src/browser.ts");
-  const { thankTorrent } = await import("../src/thanks.ts");
+  const { thank } = await import("../src/thank.ts");
 
   t.after(async () => {
     await closeAll();
@@ -101,10 +101,7 @@ void test("operator config drives the full grab → thanks flow", async (t) => {
     assert.ok(site, "expected configured site");
     const { username, password } = getSiteCredentials(site);
 
-    await enqueue("fake-site", async () => {
-      const page = await freshPage("fake-site");
-      await thankTorrent(page, trackerTorrentId, username, password, site, "e2e");
-    });
+    await thank("fake-site", trackerTorrentId, username, password, site, "e2e");
 
     assert.equal(tracker.logins.length, 1, "tracker should have observed one login");
     assert.deepEqual(tracker.logins[0], { username: "operator-user", ok: true });
@@ -126,10 +123,7 @@ void test("operator config drives the full grab → thanks flow", async (t) => {
 
     // Add a second torrent on the same Site to confirm session reuse.
     const secondTorrentId = "12345";
-    await enqueue("fake-site", async () => {
-      const page = await freshPage("fake-site");
-      await thankTorrent(page, secondTorrentId, username, password, site, "e2e");
-    });
+    await thank("fake-site", secondTorrentId, username, password, site, "e2e");
 
     assert.equal(tracker.logins.length, 1, "second thank should reuse the cached session");
     assert.equal(tracker.clicks.length, 2);
@@ -154,10 +148,7 @@ void test("operator config drives the full grab → thanks flow", async (t) => {
     });
 
     const thirdTorrentId = "24680";
-    await enqueue("fake-site", async () => {
-      const page = await freshPage("fake-site");
-      await thankTorrent(page, thirdTorrentId, username, password, site, "e2e");
-    });
+    await thank("fake-site", thirdTorrentId, username, password, site, "e2e");
 
     assert.equal(tracker.clicks.length, 3, "the torrent after a crash must still be thanked");
     assert.equal(tracker.clicks[2]?.torrentId, thirdTorrentId);
@@ -169,3 +160,77 @@ void test("operator config drives the full grab → thanks flow", async (t) => {
     assert.equal(tracker.logins.length, 1, "recovering must not require a re-login");
   });
 });
+
+// The HTTP engine performs the same Thanks without a renderer: it posts to the
+// Engine's Livewire endpoint directly. Both Livewire generations are in
+// production use, and their payloads differ, so both are covered here.
+for (const livewire of [2, 3] as const) {
+  void test(`http engine thanks over livewire ${livewire}`, async (t) => {
+    const tracker = await startFakeTracker({
+      validCredentials: { username: "operator-user", password: "operator-pw" },
+      livewire,
+    });
+
+    const siteId = `fake-http-v${livewire}`;
+    const tmpDir = mkdtempSync(join(tmpdir(), "thanks-bot-http-"));
+    const sitesPath = join(tmpDir, "sites.json");
+    writeFileSync(
+      sitesPath,
+      JSON.stringify({ sites: [{ id: siteId, base_url: tracker.baseUrl }] }),
+    );
+
+    const originalEnv = { ...process.env };
+    process.env.SITES_CONFIG_PATH = sitesPath;
+    process.env.CACHE_DIR = join(tmpDir, "cache");
+    process.env.THANKS_ENGINE = "http";
+    process.env[`${siteId.toUpperCase().replaceAll("-", "_")}_USERNAME`] = "operator-user";
+    process.env[`${siteId.toUpperCase().replaceAll("-", "_")}_PASSWORD`] = "operator-pw";
+
+    const { loadSites, getSiteCredentials } = await import("../src/config.ts");
+    const { thank } = await import("../src/thank.ts");
+
+    t.after(async () => {
+      await tracker.close();
+      rmSync(tmpDir, { recursive: true, force: true });
+      process.env = originalEnv;
+    });
+
+    const sites = loadSites();
+    const site = sites.get(siteId);
+    assert.ok(site, "expected configured site");
+    const { username, password } = getSiteCredentials(site);
+
+    await t.test("logs in and thanks without a browser", async () => {
+      await thank(siteId, "9876", username, password, site, "e2e");
+
+      assert.deepEqual(tracker.logins, [{ username: "operator-user", ok: true }]);
+      assert.equal(tracker.clicks.length, 1);
+      // The bookmark button carries the same wire:click; the fake rejects the
+      // call unless it names the thanks component, so reaching here proves the
+      // right one was invoked.
+      assert.deepEqual(tracker.clicks[0], { torrentId: "9876", authed: true });
+    });
+
+    await t.test("reuses the stored session and does not re-login", async () => {
+      await thank(siteId, "12345", username, password, site, "e2e");
+
+      assert.equal(tracker.logins.length, 1, "second thank should reuse the session cookie");
+      assert.equal(tracker.clicks.length, 2);
+      assert.deepEqual(tracker.clicks[1], { torrentId: "12345", authed: true });
+    });
+
+    await t.test("persists the session to disk so a restart need not re-login", () => {
+      const cookies = join(tmpDir, "cache", "http-sessions", `${siteId}.json`);
+      assert.ok(existsSync(cookies), "expected the cookie jar on disk");
+    });
+
+    // Livewire 2 disables the button once thanked; Livewire 3 renders it
+    // unchanged and rejects the duplicate call instead. Either way the torrent
+    // must not be counted as thanked twice.
+    await t.test("a torrent already thanked is not thanked again", async () => {
+      await thank(siteId, "9876", username, password, site, "e2e");
+
+      assert.equal(tracker.clicks.length, 2, "the duplicate must not reach the Site as a thanks");
+    });
+  });
+}

@@ -4,8 +4,8 @@ import { log } from "./log.ts";
 import { getSiteCredentials, type SitesMap } from "./config.ts";
 import { QBittorrentClient } from "./qbittorrent.ts";
 import { parseTorrentComment } from "./url-parser.ts";
-import { freshPage, enqueue, drainAll, closeAll } from "./browser.ts";
-import { thankTorrent } from "./thanks.ts";
+import { drainAll, closeAll } from "./browser.ts";
+import { thank } from "./thank.ts";
 import { registry, webhooksReceived, webhookProcessingDuration } from "./metrics.ts";
 
 const PREFIX = "webhook";
@@ -137,17 +137,14 @@ async function processGrab(
   }
 
   const logPrefix = `auto-thanks:${site.id}`;
-  await enqueue(parsed.siteKey, async () => {
-    const page = await freshPage(parsed.siteKey);
-    await thankTorrent(
-      page,
-      parsed.torrentId,
-      credentials.username,
-      credentials.password,
-      site,
-      logPrefix,
-    );
-  });
+  await thank(
+    parsed.siteKey,
+    parsed.torrentId,
+    credentials.username,
+    credentials.password,
+    site,
+    logPrefix,
+  );
 
   stopTimer({ site: parsed.siteKey });
   log(PREFIX, `[${source}] Done processing "${title}".`);
