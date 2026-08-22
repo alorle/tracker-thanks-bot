@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [1.1.0](https://github.com/alorle/tracker-thanks-bot/compare/v1.0.1...v1.1.0) (2026-08-22)
+
+### Features
+
+- **thanks:** thank over HTTP without driving a browser ([650b586](https://github.com/alorle/tracker-thanks-bot/commit/650b586b8857fa9296e3d6e33e253ce7f4e1e353))
+
+### Bug Fixes
+
+- **browser:** a crashed page poisoned every torrent after it ([02c1803](https://github.com/alorle/tracker-thanks-bot/commit/02c180306132055fdb5565c89d51c8526467782d))
+
 ## [1.0.1](https://github.com/alorle/tracker-thanks-bot/compare/v1.0.0...v1.0.1) (2026-07-27)
 
 ### Dependencies
