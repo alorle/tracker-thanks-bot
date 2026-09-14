@@ -98,29 +98,42 @@ export class QBittorrentClient {
     log(PREFIX, "Authenticated with qBittorrent.");
   }
 
-  async getTorrentComment(hash: string): Promise<string> {
+  /**
+   * GET an API path, re-authenticating at most once on a 403.
+   *
+   * The single retry is the point: a 403 that survives a fresh login is a real
+   * rejection, and retrying it on every response would never terminate.
+   */
+  private async authedGet(path: string, endpoint: string): Promise<Response> {
     await this.ensureAuth();
-    const stopTimer = qbitApiDuration.startTimer({ endpoint: "torrents/properties" });
+    const stopTimer = qbitApiDuration.startTimer({ endpoint });
 
-    const res = await fetch(
-      `${this.config.baseUrl}/api/v2/torrents/properties?hash=${hash.toLowerCase()}`,
-      { headers: this.authHeaders() },
+    try {
+      const url = `${this.config.baseUrl}${path}`;
+      let res = await fetch(url, { headers: this.authHeaders() });
+
+      if (res.status === 403) {
+        await this.handleAuthError();
+        res = await fetch(url, { headers: this.authHeaders() });
+      }
+
+      if (!res.ok) {
+        qbitApiErrors.inc({ endpoint });
+        throw new Error(`qBittorrent API error: ${res.status} ${res.statusText}`);
+      }
+
+      return res;
+    } finally {
+      stopTimer();
+    }
+  }
+
+  async getTorrentComment(hash: string): Promise<string> {
+    const res = await this.authedGet(
+      `/api/v2/torrents/properties?hash=${hash.toLowerCase()}`,
+      "torrents/properties",
     );
-
-    if (res.status === 403) {
-      stopTimer();
-      await this.handleAuthError();
-      return this.getTorrentComment(hash);
-    }
-
-    if (!res.ok) {
-      stopTimer();
-      qbitApiErrors.inc({ endpoint: "torrents/properties" });
-      throw new Error(`qBittorrent API error: ${res.status} ${res.statusText}`);
-    }
-
     const props = (await res.json()) as TorrentProperties;
-    stopTimer();
     return props.comment;
   }
 
@@ -152,27 +165,7 @@ export class QBittorrentClient {
   }
 
   async listTorrents(): Promise<TorrentInfo[]> {
-    await this.ensureAuth();
-    const stopTimer = qbitApiDuration.startTimer({ endpoint: "torrents/info" });
-
-    const res = await fetch(`${this.config.baseUrl}/api/v2/torrents/info`, {
-      headers: this.authHeaders(),
-    });
-
-    if (res.status === 403) {
-      stopTimer();
-      await this.handleAuthError();
-      return this.listTorrents();
-    }
-
-    if (!res.ok) {
-      stopTimer();
-      qbitApiErrors.inc({ endpoint: "torrents/info" });
-      throw new Error(`qBittorrent API error: ${res.status} ${res.statusText}`);
-    }
-
-    const result = (await res.json()) as TorrentInfo[];
-    stopTimer();
-    return result;
+    const res = await this.authedGet("/api/v2/torrents/info", "torrents/info");
+    return (await res.json()) as TorrentInfo[];
   }
 }

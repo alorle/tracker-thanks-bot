@@ -5,17 +5,24 @@ export type FakeTorrent = { name: string; comment: string };
 export type FakeQBittorrent = {
   baseUrl: string;
   torrents: Map<string, FakeTorrent>;
+  requests: string[];
   close: () => Promise<void>;
 };
 
 export function startFakeQBittorrent({
   torrents,
-}: { torrents?: Map<string, FakeTorrent> } = {}): Promise<FakeQBittorrent> {
+  alwaysForbidden = false,
+}: {
+  torrents?: Map<string, FakeTorrent>;
+  alwaysForbidden?: boolean;
+} = {}): Promise<FakeQBittorrent> {
   // torrents: Map<hash, { name, comment }>
   const store = torrents ?? new Map<string, FakeTorrent>();
+  const requests: string[] = [];
 
   const server = createServer((req, res) => {
     const reqUrl = new URL(req.url ?? "/", "http://127.0.0.1");
+    requests.push(reqUrl.pathname);
 
     if (reqUrl.pathname === "/api/v2/auth/login" && req.method === "POST") {
       res.writeHead(200, {
@@ -23,6 +30,12 @@ export function startFakeQBittorrent({
         "Set-Cookie": "SID=fakesid; Path=/; HttpOnly",
       });
       res.end("Ok.");
+      return;
+    }
+
+    if (alwaysForbidden) {
+      res.writeHead(403, { "Content-Type": "text/plain" });
+      res.end("Forbidden");
       return;
     }
 
@@ -58,6 +71,7 @@ export function startFakeQBittorrent({
       resolve({
         baseUrl,
         torrents: store,
+        requests,
         close: () => new Promise<void>((r) => server.close(() => r())),
       });
     });
