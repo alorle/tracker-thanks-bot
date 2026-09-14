@@ -1,13 +1,10 @@
 import { join } from "node:path";
 import { chromium } from "playwright";
 import type { BrowserContext, Page } from "playwright";
+import { getCacheDir } from "./config.ts";
 
 const contexts = new Map<string, BrowserContext>();
 const queues = new Map<string, Promise<void>>();
-
-function getCacheDir(): string {
-  return process.env.CACHE_DIR ?? join(import.meta.dirname, "..", ".cache");
-}
 
 export async function getContext(siteKey: string): Promise<BrowserContext> {
   let context = contexts.get(siteKey);
