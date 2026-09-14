@@ -79,10 +79,10 @@ async function main(): Promise<void> {
 
   if (command === "serve") {
     const port = Number(process.env.WEBHOOK_PORT ?? "3000");
+    const scanConfig = getScanConfig();
     const qbClient = QBittorrentClient.fromEnv();
     await startServer(sites, port, qbClient);
 
-    const scanConfig = getScanConfig();
     if (scanConfig.enabled) {
       scheduleDaily(scanConfig.hour, () => scanAllTorrents(sites, qbClient));
       if (scanConfig.onStart) {
