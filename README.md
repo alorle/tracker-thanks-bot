@@ -22,7 +22,7 @@ torrent page.
 
 ## Requirements
 
-- Node.js ≥ 24.18.0 (or Docker).
+- Node.js ≥ 26.8.1 (or Docker).
 - A running qBittorrent instance (WebUI enabled).
 - Radarr and/or Sonarr to send webhooks (optional — the daily scan works on
   its own).
@@ -116,7 +116,7 @@ Images are published to GHCR on every push to `main`.
 ### From source
 
 ```sh
-nvm use                  # uses .node-version (24.18.0)
+nvm use                  # uses .node-version (26.8.1)
 npm ci
 npm run build
 node dist/index.js serve

@@ -3,7 +3,7 @@
   "version": "1.1.0",
   "type": "module",
   "engines": {
-    "node": ">=24.18.0"
+    "node": ">=26.8.1"
   },
   "scripts": {
     "build": "tsc -b tsconfig.app.json",
@@ -35,7 +35,7 @@
     "@commitlint/cli": "^21.2.1",
     "@commitlint/config-conventional": "^21.2.0",
     "@eslint/js": "^10.0.1",
-    "@types/node": "^24.13.3",
+    "@types/node": "^26.5.1",
     "commit-and-tag-version": "^13.1.0",
     "eslint": "^10.8.0",
     "eslint-config-prettier": "^10.1.8",

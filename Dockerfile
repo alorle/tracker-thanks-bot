@@ -1,4 +1,4 @@
-FROM node:24.18.0-trixie-slim AS builder
+FROM node:26.8.1-trixie-slim AS builder
 
 WORKDIR /app
 
@@ -9,7 +9,7 @@ COPY src/ src/
 RUN npm run build
 
 
-FROM node:24.18.0-trixie-slim AS deps
+FROM node:26.8.1-trixie-slim AS deps
 
 WORKDIR /app
 
@@ -17,7 +17,7 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --no-audit --no-fund --ignore-scripts
 
 
-FROM node:24.18.0-trixie-slim
+FROM node:26.8.1-trixie-slim
 
 LABEL org.opencontainers.image.title="tracker-thanks-bot" \
       org.opencontainers.image.description="Auto-thanks bot for private trackers, driven by Radarr/Sonarr webhooks." \
