@@ -65,16 +65,19 @@ export async function thankTorrent(
       () => typeof (globalThis as { Livewire?: unknown }).Livewire !== "undefined",
     );
 
-    const thanksButton = page
+    const matches = page
       .locator(`button[wire\\:click="store(${torrentId})"]`)
       .filter({ hasText: "Agradecer" });
-    const count = await thanksButton.count();
 
-    if (count === 0) {
+    if ((await matches.count()) === 0) {
       log(logPrefix, `No thanks button found for torrent ${torrentId}. Skipping.`);
       torrentsSkipped.inc({ site: siteLabel, reason: "no_button" });
       return;
     }
+
+    // Several matches would make the strict-mode calls below throw rather than
+    // thank the torrent, and any one of them performs the same Thanks.
+    const thanksButton = matches.first();
 
     if (await thanksButton.isDisabled()) {
       log(logPrefix, `Torrent ${torrentId} already thanked. Skipping.`);
