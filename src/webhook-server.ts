@@ -10,6 +10,8 @@ import { registry, webhooksReceived, webhookProcessingDuration } from "./metrics
 
 const PREFIX = "webhook";
 const SHUTDOWN_TIMEOUT_MS = 30_000;
+// Radarr/Sonarr Grab payloads are a few KB; anything past this is not one.
+const MAX_BODY_BYTES = 256 * 1024;
 
 // Radarr/Sonarr webhook payload (only fields we use)
 type WebhookPayload = {
@@ -38,7 +40,16 @@ function jsonResponse(res: ServerResponse, status: number, body: unknown): void 
 function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
-    req.on("data", (chunk: Buffer) => chunks.push(chunk));
+    let size = 0;
+    req.on("data", (chunk: Buffer) => {
+      size += chunk.length;
+      if (size > MAX_BODY_BYTES) {
+        req.destroy();
+        reject(new Error(`Request body exceeds ${MAX_BODY_BYTES} bytes.`));
+        return;
+      }
+      chunks.push(chunk);
+    });
     req.on("end", () => resolve(Buffer.concat(chunks).toString()));
     req.on("error", reject);
   });
@@ -61,9 +72,16 @@ async function handleWebhook(
   qbClient: QBittorrentClient,
   sites: SitesMap,
 ): Promise<void> {
+  let body: string;
+  try {
+    body = await readBody(req);
+  } catch (err) {
+    log(PREFIX, `[${source}] Rejected request body: ${String(err)}`);
+    return;
+  }
+
   let payload: WebhookPayload;
   try {
-    const body = await readBody(req);
     payload = JSON.parse(body) as WebhookPayload;
   } catch {
     jsonResponse(res, 400, { error: "Invalid JSON body." });
@@ -177,7 +195,7 @@ export async function startServer(
   sites: SitesMap,
   port: number,
   qbClient: QBittorrentClient,
-): Promise<void> {
+): Promise<Server> {
   const webhookSecret = process.env.WEBHOOK_SECRET ?? null;
   if (!webhookSecret) {
     log(PREFIX, "WARNING: WEBHOOK_SECRET not set — /webhook/* endpoints are unauthenticated.");
@@ -244,4 +262,6 @@ export async function startServer(
       resolve();
     });
   });
+
+  return server;
 }
