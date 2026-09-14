@@ -46,8 +46,9 @@ All configuration is via environment variables. See [.env.example](.env.example)
 | `CACHE_DIR`         | no                     | `./.cache`                                                         | Where session data is stored (Playwright profile, or the HTTP engine's cookie jar).                                                                    |
 | `THANKS_ENGINE`     | no                     | `browser`                                                          | How the Thanks is performed: `browser` drives Playwright, `http` calls the tracker's Livewire endpoint directly (no renderer, no Chromium memory).     |
 | `SCAN_ENABLED`      | no                     | `true`                                                             | Run the daily scan. Set to `false` to disable.                                                                                                         |
-| `SCAN_HOUR`         | no                     | `3`                                                                | Hour (0–23) at which the daily scan runs.                                                                                                              |
+| `SCAN_HOUR`         | no                     | `3`                                                                | Hour (0–23) at which the daily scan runs. An out-of-range value aborts startup.                                                                        |
 | `SCAN_ON_START`     | no                     | `false`                                                            | Run a scan immediately on startup.                                                                                                                     |
+| `SCAN_DELAY_MS`     | no                     | `1000`                                                             | Pause between consecutive calls to a Site during a scan. Keeps a full scan from arriving as one burst, which a private tracker may read as abuse.      |
 
 ## Sites
 

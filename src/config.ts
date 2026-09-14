@@ -163,16 +163,28 @@ export function getCacheDir(): string {
   return process.env.CACHE_DIR ?? join(import.meta.dirname, "..", ".cache");
 }
 
-export function getScanConfig(): { enabled: boolean; hour: number; onStart: boolean } {
+export function getScanConfig(): {
+  enabled: boolean;
+  hour: number;
+  onStart: boolean;
+  delayMs: number;
+} {
   const rawHour = process.env.SCAN_HOUR || "3";
   const hour = Number(rawHour);
   if (!Number.isInteger(hour) || hour < 0 || hour > 23) {
     fail(`SCAN_HOUR must be an integer between 0 and 23, got "${rawHour}".`);
   }
 
+  const rawDelay = process.env.SCAN_DELAY_MS || "1000";
+  const delayMs = Number(rawDelay);
+  if (!Number.isInteger(delayMs) || delayMs < 0) {
+    fail(`SCAN_DELAY_MS must be a non-negative integer, got "${rawDelay}".`);
+  }
+
   return {
     enabled: process.env.SCAN_ENABLED !== "false",
     hour,
     onStart: process.env.SCAN_ON_START === "true",
+    delayMs,
   };
 }

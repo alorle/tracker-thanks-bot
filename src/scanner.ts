@@ -1,5 +1,6 @@
+import { setTimeout as sleep } from "node:timers/promises";
 import { log } from "./log.ts";
-import { getSiteCredentials, type SitesMap } from "./config.ts";
+import { getScanConfig, getSiteCredentials, type SitesMap } from "./config.ts";
 import { parseTorrentComment } from "./url-parser.ts";
 import { thank } from "./thank.ts";
 import type { QBittorrentClient } from "./qbittorrent.ts";
@@ -10,10 +11,12 @@ const PREFIX = "scanner";
 export async function scanAllTorrents(sites: SitesMap, qbClient: QBittorrentClient): Promise<void> {
   log(PREFIX, "Starting torrent scan...");
   const stopTimer = scanDuration.startTimer();
+  const { delayMs } = getScanConfig();
 
   const torrents = await qbClient.listTorrents();
   log(PREFIX, `Found ${torrents.length} torrent(s) in qBittorrent.`);
 
+  let siteTouched = false;
   let thankedCount = 0;
   let skippedCount = 0;
   let errorCount = 0;
@@ -53,6 +56,12 @@ export async function scanAllTorrents(sites: SitesMap, qbClient: QBittorrentClie
         skippedCount++;
         continue;
       }
+
+      // A scan walks every torrent at once; without this the Site would take
+      // the whole batch as fast as the network allows, which is how an account
+      // on a private tracker gets itself banned.
+      if (siteTouched) await sleep(delayMs);
+      siteTouched = true;
 
       const logPrefix = `auto-thanks:${site.id}`;
       await thank(
