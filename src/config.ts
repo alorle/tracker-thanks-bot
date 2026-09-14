@@ -164,9 +164,15 @@ export function getCacheDir(): string {
 }
 
 export function getScanConfig(): { enabled: boolean; hour: number; onStart: boolean } {
+  const rawHour = process.env.SCAN_HOUR || "3";
+  const hour = Number(rawHour);
+  if (!Number.isInteger(hour) || hour < 0 || hour > 23) {
+    fail(`SCAN_HOUR must be an integer between 0 and 23, got "${rawHour}".`);
+  }
+
   return {
     enabled: process.env.SCAN_ENABLED !== "false",
-    hour: Number(process.env.SCAN_HOUR ?? "3"),
+    hour,
     onStart: process.env.SCAN_ON_START === "true",
   };
 }

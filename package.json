@@ -9,7 +9,7 @@
     "build": "tsc -b tsconfig.app.json",
     "typecheck": "tsc -b",
     "start": "node src/index.ts",
-    "test": "npm run typecheck && node --test --test-timeout=120000 test/e2e.test.ts",
+    "test": "npm run typecheck && node --test --test-timeout=120000 test/*.test.ts",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier . --write",
