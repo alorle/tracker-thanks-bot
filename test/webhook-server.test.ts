@@ -121,6 +121,10 @@ void test("an oversized webhook body is cut off and leaves the server healthy", 
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ eventType: "Grab", padding: "x".repeat(512 * 1024) }),
       }),
+    // A transport failure, not an HTTP status: the socket must die mid-body.
+    // The errno itself is left open, it differs between macOS and CI.
+    (err: unknown) =>
+      err instanceof TypeError && err.message === "fetch failed" && err.cause !== undefined,
     "the connection must be cut instead of buffering the whole body",
   );
 
