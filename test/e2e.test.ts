@@ -106,7 +106,7 @@ void test("operator config drives the full grab → thanks flow", async (t) => {
 
     const parsed = parseTorrentComment(sites, comment);
     assert.ok(parsed, "expected parser to match the configured base_url");
-    assert.equal(parsed.siteKey, "fake-site");
+    assert.equal(parsed.site.id, "fake-site");
     assert.equal(parsed.torrentId, trackerTorrentId);
   });
 
