@@ -43,6 +43,9 @@ void test("operator config drives the full grab → thanks flow", async (t) => {
   const originalEnv = { ...process.env };
   process.env.SITES_CONFIG_PATH = sitesPath;
   process.env.CACHE_DIR = join(tmpDir, "cache");
+  // Without this the Operator's own THANKS_ENGINE (direnv exports .env into
+  // every shell here) silently turns this into a second http-engine test.
+  process.env.THANKS_ENGINE = "browser";
   process.env.FAKE_SITE_USERNAME = "operator-user";
   process.env.FAKE_SITE_PASSWORD = "operator-pw";
   process.env.QBIT_URL = qbit.baseUrl;
