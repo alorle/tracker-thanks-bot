@@ -117,29 +117,27 @@ async function main(): Promise<void> {
     return;
   }
 
-  console.log("Usage:");
-  console.log("  node dist/index.js <site> <id1> <id2> ...   Thank specific torrents");
-  console.log("  node dist/index.js serve                    Start webhook server + daily scan");
-  console.log("  node dist/index.js scan                     Run scan once and exit");
-  console.log("\nSites are configured in sites.json (see SITES_CONFIG_PATH).");
-  console.log("For each Site id, set <ID>_USERNAME and <ID>_PASSWORD env vars");
-  console.log("(uppercase id, with '-' replaced by '_').");
-  console.log("\nOther environment variables:");
-  console.log("  QBIT_URL                       qBittorrent WebUI URL");
-  console.log("  QBIT_API_KEY                   qBittorrent API key (v5.2.0+, preferred)");
-  console.log("  QBIT_USERNAME                  qBittorrent WebUI username (if no API key)");
-  console.log("  QBIT_PASSWORD                  qBittorrent WebUI password (if no API key)");
-  console.log("  WEBHOOK_PORT                   Webhook server port (default: 3000)");
-  console.log(
-    "  WEBHOOK_SECRET                 Shared secret required in X-Webhook-Secret header (optional but recommended)",
-  );
-  console.log(
-    "  SITES_CONFIG_PATH              Path to sites.json (default: <repo>/config/sites.json or /app/config/sites.json in Docker)",
-  );
-  console.log("  CACHE_DIR                      Browser session cache directory");
-  console.log("  SCAN_ENABLED                   Enable daily scan (default: true)");
-  console.log("  SCAN_HOUR                      Hour to run daily scan, 0-23 (default: 3)");
-  console.log("  SCAN_ON_START                  Run scan on startup (default: false)");
+  console.log(`Usage:
+  node dist/index.js <site> <id1> <id2> ...   Thank specific torrents
+  node dist/index.js serve                    Start webhook server + daily scan
+  node dist/index.js scan                     Run scan once and exit
+
+Sites are configured in sites.json (see SITES_CONFIG_PATH).
+For each Site id, set <ID>_USERNAME and <ID>_PASSWORD env vars
+(uppercase id, with '-' replaced by '_').
+
+Other environment variables:
+  QBIT_URL                       qBittorrent WebUI URL
+  QBIT_API_KEY                   qBittorrent API key (v5.2.0+, preferred)
+  QBIT_USERNAME                  qBittorrent WebUI username (if no API key)
+  QBIT_PASSWORD                  qBittorrent WebUI password (if no API key)
+  WEBHOOK_PORT                   Webhook server port (default: 3000)
+  WEBHOOK_SECRET                 Shared secret required in X-Webhook-Secret header (optional but recommended)
+  SITES_CONFIG_PATH              Path to sites.json (default: <repo>/config/sites.json or /app/config/sites.json in Docker)
+  CACHE_DIR                      Browser session cache directory
+  SCAN_ENABLED                   Enable daily scan (default: true)
+  SCAN_HOUR                      Hour to run daily scan, 0-23 (default: 3)
+  SCAN_ON_START                  Run scan on startup (default: false)`);
 }
 
 main().catch((error: unknown) => {
