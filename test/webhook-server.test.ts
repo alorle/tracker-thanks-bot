@@ -101,7 +101,8 @@ void test("a Grab webhook thanks the torrent it names", async (t) => {
   });
 
   await waitFor(() => tracker.clicks.length === 1, "the Grab must reach the Site as a thanks");
-  assert.deepEqual(tracker.clicks[0], { torrentId: "9876", authed: true });
+  assert.equal(tracker.clicks[0]?.torrentId, "9876");
+  assert.equal(tracker.clicks[0]?.authed, true, "the thanks must carry a logged-in session");
 });
 
 // The webhook endpoints are anonymous when the Operator leaves WEBHOOK_SECRET

@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 
 export type LoginAttempt = { username: string; ok: boolean };
-export type ThanksClick = { torrentId: string; authed: boolean };
+export type ThanksClick = { torrentId: string; authed: boolean; at: number };
 
 export type FakeTracker = {
   baseUrl: string;
@@ -203,7 +203,7 @@ export function startFakeTracker({
           return;
         }
         thanked.add(torrentId);
-        clicks.push({ torrentId, authed: isAuthed });
+        clicks.push({ torrentId, authed: isAuthed, at: Date.now() });
         res.end(JSON.stringify(dispatch("success", "¡Gracias!")));
       });
       return;

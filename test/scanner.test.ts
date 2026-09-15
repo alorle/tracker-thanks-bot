@@ -49,13 +49,11 @@ void test("the scan paces its calls to the Site", async (t) => {
     process.env = originalEnv;
   });
 
-  const startedAt = Date.now();
   await scanAllTorrents(loadSites(), QBittorrentClient.fromEnv());
-  const elapsed = Date.now() - startedAt;
 
   assert.equal(tracker.clicks.length, 2, "both matching torrents must be thanked");
-  assert.ok(
-    elapsed >= 300,
-    `expected one delay between the two Site calls, scan took ${elapsed}ms`,
-  );
+  const [first, second] = tracker.clicks;
+  assert.ok(first && second, "expected two clicks to compare");
+  const gap = second.at - first.at;
+  assert.ok(gap >= 300, `expected the configured delay between the two Site calls, got ${gap}ms`);
 });
