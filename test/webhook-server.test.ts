@@ -1,46 +1,116 @@
-import { test } from "node:test";
+import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
+import { setTimeout as sleep } from "node:timers/promises";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { startFakeQBittorrent } from "./fake-qbittorrent.ts";
+import { startFakeQBittorrent, type FakeTorrent } from "./fake-qbittorrent.ts";
+import { startFakeTracker } from "./fake-tracker.ts";
 
-// The webhook endpoints are anonymous when the Operator leaves WEBHOOK_SECRET
-// unset, so an oversized body must be refused as it arrives rather than
-// buffered whole.
-void test("an oversized webhook body is cut off and leaves the server healthy", async (t) => {
-  const qbit = await startFakeQBittorrent();
+async function startBot(
+  t: TestContext,
+  {
+    siteId,
+    baseUrl,
+    torrents,
+    secret,
+  }: { siteId: string; baseUrl: string; torrents?: Map<string, FakeTorrent>; secret?: string },
+): Promise<number> {
+  const qbit = await startFakeQBittorrent({ torrents });
 
   const tmpDir = mkdtempSync(join(tmpdir(), "thanks-bot-webhook-"));
   const sitesPath = join(tmpDir, "sites.json");
-  writeFileSync(
-    sitesPath,
-    JSON.stringify({ sites: [{ id: "fake-site", base_url: "https://tracker.example.com" }] }),
-  );
+  writeFileSync(sitesPath, JSON.stringify({ sites: [{ id: siteId, base_url: baseUrl }] }));
+
+  const { loadSites, envVarBase } = await import("../src/config.ts");
+  const { QBittorrentClient } = await import("../src/qbittorrent.ts");
+  const { startServer } = await import("../src/webhook-server.ts");
 
   const originalEnv = { ...process.env };
   process.env.SITES_CONFIG_PATH = sitesPath;
-  process.env.FAKE_SITE_USERNAME = "operator-user";
-  process.env.FAKE_SITE_PASSWORD = "operator-pw";
+  process.env.CACHE_DIR = join(tmpDir, "cache");
+  process.env.THANKS_ENGINE = "http";
+  process.env[`${envVarBase(siteId)}_USERNAME`] = "operator-user";
+  process.env[`${envVarBase(siteId)}_PASSWORD`] = "operator-pw";
   process.env.QBIT_URL = qbit.baseUrl;
   process.env.QBIT_USERNAME = "qbit-user";
   process.env.QBIT_PASSWORD = "qbit-pw";
   delete process.env.QBIT_API_KEY;
-  delete process.env.WEBHOOK_SECRET;
-
-  const { loadSites } = await import("../src/config.ts");
-  const { QBittorrentClient } = await import("../src/qbittorrent.ts");
-  const { startServer } = await import("../src/webhook-server.ts");
+  if (secret === undefined) delete process.env.WEBHOOK_SECRET;
+  else process.env.WEBHOOK_SECRET = secret;
 
   const server = await startServer(loadSites(), 0, QBittorrentClient.fromEnv());
   const address = server.address();
-  const port = typeof address === "object" && address ? address.port : 0;
 
   t.after(async () => {
     await new Promise<void>((resolve) => server.close(() => resolve()));
     await qbit.close();
     rmSync(tmpDir, { recursive: true, force: true });
     process.env = originalEnv;
+  });
+
+  return typeof address === "object" && address ? address.port : 0;
+}
+
+// The Grab handler answers before it does the work, so the click lands after
+// the response. Polling is what makes that observable without a fixed sleep.
+async function waitFor(predicate: () => boolean, message: string): Promise<void> {
+  const deadline = Date.now() + 5000;
+  while (!predicate()) {
+    if (Date.now() > deadline) assert.fail(message);
+    await sleep(10);
+  }
+}
+
+// This is how the bot is actually triggered in production: Radarr posts a Grab,
+// the bot looks the hash up in qBittorrent, matches the comment against a Site
+// and thanks. Every other test wires those steps by hand, so without this one
+// the whole webhook path could stop calling thank() unnoticed.
+void test("a Grab webhook thanks the torrent it names", async (t) => {
+  const tracker = await startFakeTracker({
+    validCredentials: { username: "operator-user", password: "operator-pw" },
+  });
+  t.after(() => tracker.close());
+
+  const torrentHash = "abcdef1234567890abcdef1234567890abcdef12";
+  const port = await startBot(t, {
+    siteId: "grab-site",
+    baseUrl: tracker.baseUrl,
+    torrents: new Map([
+      [
+        torrentHash,
+        { name: "Some.Movie.2024", comment: `Source: ${tracker.baseUrl}/torrents/9876` },
+      ],
+    ]),
+  });
+
+  const response = await fetch(`http://127.0.0.1:${port}/webhook/radarr`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      eventType: "Grab",
+      downloadId: torrentHash.toUpperCase(),
+      movie: { title: "Some.Movie.2024" },
+    }),
+  });
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), {
+    status: "accepted",
+    hash: torrentHash.toUpperCase(),
+  });
+
+  await waitFor(() => tracker.clicks.length === 1, "the Grab must reach the Site as a thanks");
+  assert.deepEqual(tracker.clicks[0], { torrentId: "9876", authed: true });
+});
+
+// The webhook endpoints are anonymous when the Operator leaves WEBHOOK_SECRET
+// unset, so an oversized body must be refused as it arrives rather than
+// buffered whole.
+void test("an oversized webhook body is cut off and leaves the server healthy", async (t) => {
+  const port = await startBot(t, {
+    siteId: "fake-site",
+    baseUrl: "https://tracker.example.com",
   });
 
   await assert.rejects(
