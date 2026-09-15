@@ -12,6 +12,7 @@ import {
 
 const REQUEST_TIMEOUT_MS = 30_000;
 const MAX_REDIRECTS = 10;
+const THANK_COMPONENT = "thank-button";
 const USER_AGENT =
   "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36";
 
@@ -28,7 +29,6 @@ type ThankButton = {
   livewire: 2 | 3;
   /** The component payload exactly as the HTML served it — it is server-signed. */
   snapshot: string;
-  componentName: string;
   fingerprint?: unknown;
   serverMemo?: unknown;
   disabled: boolean;
@@ -171,13 +171,11 @@ export function findThankButton(html: string): ThankButton | null {
       } catch {
         continue;
       }
-      const componentName = parsed.memo?.name ?? parsed.fingerprint?.name;
-      if (componentName !== "thank-button") continue;
+      if ((parsed.memo?.name ?? parsed.fingerprint?.name) !== THANK_COMPONENT) continue;
 
       return {
         livewire: attribute === "wire:snapshot" ? 3 : 2,
         snapshot,
-        componentName,
         fingerprint: parsed.fingerprint,
         serverMemo: parsed.serverMemo,
         disabled: /\sdisabled(\s|=|>|\/)/.test(tagAt(html, match.index)),
@@ -254,7 +252,7 @@ async function callStore(
           },
         ]
       : [
-          `${site.baseUrl}/livewire/message/${button.componentName}`,
+          `${site.baseUrl}/livewire/message/${THANK_COMPONENT}`,
           {
             fingerprint: button.fingerprint,
             serverMemo: button.serverMemo,
