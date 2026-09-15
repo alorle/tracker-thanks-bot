@@ -49,8 +49,6 @@ function normalizeBaseUrl(raw: string, id: string): string {
   } catch {
     fail(`Site "${id}" base_url is not a valid URL: "${raw}".`);
   }
-  // URL already lowercases hostname, but be explicit for clarity.
-  url.hostname = url.hostname.toLowerCase();
   const normalized = url.toString();
   return normalized.endsWith("/") ? normalized.slice(0, -1) : normalized;
 }
