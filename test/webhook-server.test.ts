@@ -133,3 +133,34 @@ void test("an oversized webhook body is cut off and leaves the server healthy", 
   });
   assert.equal(small.status, 200, "a normal payload must still be accepted");
 });
+
+// WEBHOOK_SECRET is the bot's only authentication, and timingSafeEqual throws
+// on operands of different lengths, so the length check in front of it is load
+// bearing: a secret of the wrong size must be rejected, not crash the handler.
+void test("a Grab is refused unless it carries the configured secret", async (t) => {
+  const port = await startBot(t, {
+    siteId: "secret-site",
+    baseUrl: "https://tracker.example.com",
+    secret: "s3cr3t-value",
+  });
+
+  const post = (headers: Record<string, string>): Promise<Response> =>
+    fetch(`http://127.0.0.1:${port}/webhook/radarr`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...headers },
+      body: JSON.stringify({ eventType: "Download" }),
+    });
+
+  const refused: [string, Record<string, string>][] = [
+    ["no secret at all", {}],
+    ["a wrong secret of the same length", { "x-webhook-secret": "wr0ng-value!" }],
+    ["a secret of a different length", { "x-webhook-secret": "short" }],
+  ];
+  for (const [what, headers] of refused) {
+    const response = await post(headers);
+    assert.equal(response.status, 401, `expected ${what} to be rejected`);
+  }
+
+  const accepted = await post({ "x-webhook-secret": "s3cr3t-value" });
+  assert.equal(accepted.status, 200, "the configured secret must be accepted");
+});
