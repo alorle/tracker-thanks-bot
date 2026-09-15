@@ -1,11 +1,10 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { timingSafeEqual } from "node:crypto";
 import { log } from "./log.ts";
-import { getSiteCredentials, type SitesMap } from "./config.ts";
+import type { SitesMap } from "./config.ts";
 import type { QBittorrentClient } from "./qbittorrent.ts";
-import { parseTorrentComment } from "./url-parser.ts";
 import { drainAll, closeAll } from "./browser.ts";
-import { thank } from "./thank.ts";
+import { resolveThankTarget, thank } from "./thank.ts";
 import { registry, webhooksReceived, webhookProcessingDuration } from "./metrics.ts";
 
 const PREFIX = "webhook";
@@ -129,42 +128,24 @@ async function processGrab(
   log(PREFIX, `[${source}] Querying qBittorrent for torrent comment (hash: ${hash})...`);
   const comment = await qbClient.getTorrentCommentWithRetry(hash);
 
-  const parsed = parseTorrentComment(sites, comment);
-  if (!parsed) {
-    log(PREFIX, `[${source}] No matching site URL in comment: "${comment}". Skipping.`);
-    stopTimer({ site: "unknown" });
+  const resolved = resolveThankTarget(sites, comment);
+  if (!resolved.ok) {
+    log(
+      PREFIX,
+      resolved.reason === "no_match"
+        ? `[${source}] No matching site URL in comment: "${comment}". Skipping.`
+        : `[${source}] Missing credentials for ${resolved.siteId}: ${resolved.message}`,
+    );
+    stopTimer({ site: resolved.siteId ?? "unknown" });
     return;
   }
 
-  const site = sites.get(parsed.siteKey);
-  if (!site) {
-    log(PREFIX, `[${source}] Unknown site key "${parsed.siteKey}". Skipping.`);
-    stopTimer({ site: "unknown" });
-    return;
-  }
+  const { site, torrentId } = resolved.target;
+  log(PREFIX, `[${source}] Matched ${site.id} torrent ${torrentId} for "${title}".`);
 
-  log(PREFIX, `[${source}] Matched ${site.id} torrent ${parsed.torrentId} for "${title}".`);
+  await thank(resolved.target);
 
-  let credentials: { username: string; password: string };
-  try {
-    credentials = getSiteCredentials(site);
-  } catch (err) {
-    log(PREFIX, `[${source}] Missing credentials for ${site.id}: ${String(err)}`);
-    stopTimer({ site: parsed.siteKey });
-    return;
-  }
-
-  const logPrefix = `auto-thanks:${site.id}`;
-  await thank(
-    parsed.siteKey,
-    parsed.torrentId,
-    credentials.username,
-    credentials.password,
-    site,
-    logPrefix,
-  );
-
-  stopTimer({ site: parsed.siteKey });
+  stopTimer({ site: site.id });
   log(PREFIX, `[${source}] Done processing "${title}".`);
 }
 

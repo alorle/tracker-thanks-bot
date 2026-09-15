@@ -1,7 +1,8 @@
-import type { SitesMap } from "./config.ts";
+import type { SiteConfig, SitesMap } from "./config.ts";
 
 export type ParsedTorrentUrl = {
   siteKey: string;
+  site: SiteConfig;
   torrentId: string;
 };
 
@@ -11,7 +12,7 @@ export function parseTorrentComment(sites: SitesMap, comment: string): ParsedTor
     const pattern = new RegExp(`${escaped}/torrents/(\\d+)`);
     const match = comment.match(pattern);
     if (match?.[1]) {
-      return { siteKey: key, torrentId: match[1] };
+      return { siteKey: key, site, torrentId: match[1] };
     }
   }
   return null;

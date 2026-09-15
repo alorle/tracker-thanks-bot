@@ -58,7 +58,7 @@ async function runCli(sites: SitesMap, siteKey: string, torrentIds: string[]): P
   try {
     for (const torrentId of torrentIds) {
       try {
-        await thank(siteKey, torrentId, username, password, site, logPrefix);
+        await thank({ site, torrentId, username, password });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         if (message.includes("Login failed")) throw error;

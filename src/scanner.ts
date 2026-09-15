@@ -1,8 +1,7 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import { log } from "./log.ts";
-import { getScanConfig, getSiteCredentials, type SitesMap } from "./config.ts";
-import { parseTorrentComment } from "./url-parser.ts";
-import { thank } from "./thank.ts";
+import { getScanConfig, type SitesMap } from "./config.ts";
+import { resolveThankTarget, thank } from "./thank.ts";
 import type { QBittorrentClient } from "./qbittorrent.ts";
 import { scansCompleted, scanDuration, scanTorrentsProcessed } from "./metrics.ts";
 
@@ -37,22 +36,8 @@ export async function scanAllTorrents(sites: SitesMap, qbClient: QBittorrentClie
         continue;
       }
 
-      const parsed = parseTorrentComment(sites, comment);
-      if (!parsed) {
-        skippedCount++;
-        continue;
-      }
-
-      const site = sites.get(parsed.siteKey);
-      if (!site) {
-        skippedCount++;
-        continue;
-      }
-
-      let credentials: { username: string; password: string };
-      try {
-        credentials = getSiteCredentials(site);
-      } catch {
+      const resolved = resolveThankTarget(sites, comment);
+      if (!resolved.ok) {
         skippedCount++;
         continue;
       }
@@ -63,15 +48,7 @@ export async function scanAllTorrents(sites: SitesMap, qbClient: QBittorrentClie
       if (siteTouched) await sleep(delayMs);
       siteTouched = true;
 
-      const logPrefix = `auto-thanks:${site.id}`;
-      await thank(
-        parsed.siteKey,
-        parsed.torrentId,
-        credentials.username,
-        credentials.password,
-        site,
-        logPrefix,
-      );
+      await thank(resolved.target);
       thankedCount++;
     } catch (err) {
       log(PREFIX, `Error processing torrent "${torrent.name}": ${String(err)}`);

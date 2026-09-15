@@ -126,7 +126,7 @@ void test("operator config drives the full grab → thanks flow", async (t) => {
     const { username, password } = getSiteCredentials(site);
 
     const clicksBefore = tracker.clicks.length;
-    await thank("fake-site", trackerTorrentId, username, password, site, "e2e");
+    await thank({ site, torrentId: trackerTorrentId, username, password });
 
     assert.equal(tracker.logins.length, 1, "tracker should have observed one login");
     assert.deepEqual(tracker.logins[0], { username: "operator-user", ok: true });
@@ -148,7 +148,7 @@ void test("operator config drives the full grab → thanks flow", async (t) => {
     // Add a second torrent on the same Site to confirm session reuse.
     const secondTorrentId = "12345";
     const clicksBefore = tracker.clicks.length;
-    await thank("fake-site", secondTorrentId, username, password, site, "e2e");
+    await thank({ site, torrentId: secondTorrentId, username, password });
 
     assert.equal(tracker.logins.length, 1, "second thank should reuse the cached session");
     assertThanked(
@@ -177,7 +177,7 @@ void test("operator config drives the full grab → thanks flow", async (t) => {
 
     const thirdTorrentId = "24680";
     const clicksBefore = tracker.clicks.length;
-    await thank("fake-site", thirdTorrentId, username, password, site, "e2e");
+    await thank({ site, torrentId: thirdTorrentId, username, password });
 
     assertThanked(
       tracker.clicks,
@@ -230,7 +230,7 @@ for (const livewire of [2, 3] as const) {
 
     await t.test("logs in and thanks without a browser", async () => {
       const clicksBefore = tracker.clicks.length;
-      await thank(siteId, "9876", username, password, site, "e2e");
+      await thank({ site, torrentId: "9876", username, password });
 
       assert.deepEqual(tracker.logins, [{ username: "operator-user", ok: true }]);
       // The bookmark button carries the same wire:click; the fake rejects the
@@ -241,7 +241,7 @@ for (const livewire of [2, 3] as const) {
 
     await t.test("reuses the stored session and does not re-login", async () => {
       const clicksBefore = tracker.clicks.length;
-      await thank(siteId, "12345", username, password, site, "e2e");
+      await thank({ site, torrentId: "12345", username, password });
 
       assert.equal(tracker.logins.length, 1, "second thank should reuse the session cookie");
       assertThanked(
@@ -262,7 +262,7 @@ for (const livewire of [2, 3] as const) {
     // must not be counted as thanked twice.
     await t.test("a torrent already thanked is not thanked again", async () => {
       const clicksBefore = tracker.clicks.length;
-      await thank(siteId, "9876", username, password, site, "e2e");
+      await thank({ site, torrentId: "9876", username, password });
 
       assertThanked(
         tracker.clicks,
