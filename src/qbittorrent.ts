@@ -1,3 +1,4 @@
+import { setTimeout as sleep } from "node:timers/promises";
 import { log } from "./log.ts";
 import { getRequiredEnv } from "./config.ts";
 import { qbitApiDuration, qbitApiErrors } from "./metrics.ts";
@@ -156,9 +157,9 @@ export class QBittorrentClient {
       }
 
       if (attempt < maxAttempts) {
-        const delay = initialDelayMs * Math.pow(2, attempt - 1);
+        const delay = initialDelayMs * 2 ** (attempt - 1);
         log(PREFIX, `Retrying in ${delay}ms...`);
-        await new Promise((resolve) => setTimeout(resolve, delay));
+        await sleep(delay);
       }
     }
     throw new Error(`Torrent ${hash} comment still empty after ${maxAttempts} attempts.`);
