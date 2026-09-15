@@ -302,16 +302,14 @@ async function callStore(
 }
 
 export async function thankTorrentHttp(
-  siteKey: string,
   torrentId: string,
   username: string,
   password: string,
   site: SiteConfig,
   logPrefix: string,
 ): Promise<void> {
-  const siteLabel = site.id;
-  const stopTimer = thankDuration.startTimer({ site: siteLabel });
-  const jar = loadJar(siteKey);
+  const stopTimer = thankDuration.startTimer({ site: site.id });
+  const jar = loadJar(site.id);
 
   try {
     const url = `${site.baseUrl}/torrents/${torrentId}`;
@@ -329,7 +327,7 @@ export async function thankTorrentHttp(
     const button = findThankButton(page.body);
     if (!button) {
       log(logPrefix, `No thanks button found for torrent ${torrentId}. Skipping.`);
-      torrentsSkipped.inc({ site: siteLabel, reason: "no_button" });
+      torrentsSkipped.inc({ site: site.id, reason: "no_button" });
       return;
     }
 
@@ -337,7 +335,7 @@ export async function thankTorrentHttp(
     // the Site rejects the duplicate call instead, handled below.
     if (button.disabled) {
       log(logPrefix, `Torrent ${torrentId} already thanked. Skipping.`);
-      torrentsSkipped.inc({ site: siteLabel, reason: "already_thanked" });
+      torrentsSkipped.inc({ site: site.id, reason: "already_thanked" });
       return;
     }
 
@@ -349,17 +347,17 @@ export async function thankTorrentHttp(
     const rejection = await callStore(jar, site, button, torrentId, csrfToken, url);
     if (rejection) {
       log(logPrefix, `Site rejected thanks for torrent ${torrentId}: ${rejection}`);
-      torrentsSkipped.inc({ site: siteLabel, reason: "rejected" });
+      torrentsSkipped.inc({ site: site.id, reason: "rejected" });
       return;
     }
 
-    torrentsThanked.inc({ site: siteLabel });
+    torrentsThanked.inc({ site: site.id });
     log(logPrefix, `Thanked torrent ${torrentId}. (livewire v${button.livewire})`);
   } catch (err) {
-    torrentsErrored.inc({ site: siteLabel });
+    torrentsErrored.inc({ site: site.id });
     throw err;
   } finally {
     stopTimer();
-    saveJar(siteKey, jar);
+    saveJar(site.id, jar);
   }
 }

@@ -43,8 +43,7 @@ export async function thankTorrent(
   site: SiteConfig,
   logPrefix: string,
 ): Promise<void> {
-  const siteLabel = site.id;
-  const stopTimer = thankDuration.startTimer({ site: siteLabel });
+  const stopTimer = thankDuration.startTimer({ site: site.id });
 
   try {
     const url = `${site.baseUrl}/torrents/${torrentId}`;
@@ -71,7 +70,7 @@ export async function thankTorrent(
 
     if ((await matches.count()) === 0) {
       log(logPrefix, `No thanks button found for torrent ${torrentId}. Skipping.`);
-      torrentsSkipped.inc({ site: siteLabel, reason: "no_button" });
+      torrentsSkipped.inc({ site: site.id, reason: "no_button" });
       return;
     }
 
@@ -81,7 +80,7 @@ export async function thankTorrent(
 
     if (await thanksButton.isDisabled()) {
       log(logPrefix, `Torrent ${torrentId} already thanked. Skipping.`);
-      torrentsSkipped.inc({ site: siteLabel, reason: "already_thanked" });
+      torrentsSkipped.inc({ site: site.id, reason: "already_thanked" });
       return;
     }
 
@@ -89,10 +88,10 @@ export async function thankTorrent(
       page.waitForResponse((res) => res.url().includes("/livewire")),
       thanksButton.click(),
     ]);
-    torrentsThanked.inc({ site: siteLabel });
+    torrentsThanked.inc({ site: site.id });
     log(logPrefix, `Thanked torrent ${torrentId}. (status: ${response.status()})`);
   } catch (err) {
-    torrentsErrored.inc({ site: siteLabel });
+    torrentsErrored.inc({ site: site.id });
     throw err;
   } finally {
     stopTimer();

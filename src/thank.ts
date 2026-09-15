@@ -65,7 +65,7 @@ export function thank({ site, torrentId, username, password }: ThankTarget): Pro
   const logPrefix = `auto-thanks:${site.id}`;
   return enqueue(site.id, async () => {
     if (getThanksEngine() === "http") {
-      await thankTorrentHttp(site.id, torrentId, username, password, site, logPrefix);
+      await thankTorrentHttp(torrentId, username, password, site, logPrefix);
       return;
     }
     const page = await freshPage(site.id);
