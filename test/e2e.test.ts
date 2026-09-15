@@ -3,8 +3,29 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { startFakeTracker } from "./fake-tracker.ts";
+import { startFakeTracker, type ThanksClick } from "./fake-tracker.ts";
 import { startFakeQBittorrent } from "./fake-qbittorrent.ts";
+
+// Assert what a step added to the Site's click log rather than the running
+// total: a total makes every later step fail once an earlier one does, and
+// reports "expected 3 to equal 2" instead of naming the step that broke.
+function assertThanked(
+  clicks: ThanksClick[],
+  before: number,
+  expected: string[],
+  message: string,
+): void {
+  const added = clicks.slice(before);
+  assert.deepEqual(
+    added.map((click) => click.torrentId),
+    expected,
+    message,
+  );
+  assert.ok(
+    added.every((click) => click.authed),
+    "every thanks must be sent with an authenticated session",
+  );
+}
 
 // Business scenario:
 //   The Operator configures a Site "fake-site" in sites.json and sets
@@ -104,17 +125,17 @@ void test("operator config drives the full grab → thanks flow", async (t) => {
     assert.ok(site, "expected configured site");
     const { username, password } = getSiteCredentials(site);
 
+    const clicksBefore = tracker.clicks.length;
     await thank("fake-site", trackerTorrentId, username, password, site, "e2e");
 
     assert.equal(tracker.logins.length, 1, "tracker should have observed one login");
     assert.deepEqual(tracker.logins[0], { username: "operator-user", ok: true });
 
-    assert.equal(tracker.clicks.length, 1, "tracker should have observed exactly one thanks click");
-    assert.equal(tracker.clicks[0]?.torrentId, trackerTorrentId);
-    assert.equal(
-      tracker.clicks[0]?.authed,
-      true,
-      "click must be made with an authenticated session",
+    assertThanked(
+      tracker.clicks,
+      clicksBefore,
+      [trackerTorrentId],
+      "the grabbed torrent must be thanked exactly once",
     );
   });
 
@@ -126,12 +147,16 @@ void test("operator config drives the full grab → thanks flow", async (t) => {
 
     // Add a second torrent on the same Site to confirm session reuse.
     const secondTorrentId = "12345";
+    const clicksBefore = tracker.clicks.length;
     await thank("fake-site", secondTorrentId, username, password, site, "e2e");
 
     assert.equal(tracker.logins.length, 1, "second thank should reuse the cached session");
-    assert.equal(tracker.clicks.length, 2);
-    assert.equal(tracker.clicks[1]?.torrentId, secondTorrentId);
-    assert.equal(tracker.clicks[1]?.authed, true);
+    assertThanked(
+      tracker.clicks,
+      clicksBefore,
+      [secondTorrentId],
+      "the second torrent must be thanked exactly once",
+    );
   });
 
   // Regression: a renderer killed mid-scan (the container's memory ceiling is
@@ -151,14 +176,14 @@ void test("operator config drives the full grab → thanks flow", async (t) => {
     });
 
     const thirdTorrentId = "24680";
+    const clicksBefore = tracker.clicks.length;
     await thank("fake-site", thirdTorrentId, username, password, site, "e2e");
 
-    assert.equal(tracker.clicks.length, 3, "the torrent after a crash must still be thanked");
-    assert.equal(tracker.clicks[2]?.torrentId, thirdTorrentId);
-    assert.equal(
-      tracker.clicks[2]?.authed,
-      true,
-      "the session must survive the crash: it lives in the context, not the page",
+    assertThanked(
+      tracker.clicks,
+      clicksBefore,
+      [thirdTorrentId],
+      "the torrent after a crash must still be thanked",
     );
     assert.equal(tracker.logins.length, 1, "recovering must not require a re-login");
   });
@@ -204,22 +229,27 @@ for (const livewire of [2, 3] as const) {
     const { username, password } = getSiteCredentials(site);
 
     await t.test("logs in and thanks without a browser", async () => {
+      const clicksBefore = tracker.clicks.length;
       await thank(siteId, "9876", username, password, site, "e2e");
 
       assert.deepEqual(tracker.logins, [{ username: "operator-user", ok: true }]);
-      assert.equal(tracker.clicks.length, 1);
       // The bookmark button carries the same wire:click; the fake rejects the
       // call unless it names the thanks component, so reaching here proves the
       // right one was invoked.
-      assert.deepEqual(tracker.clicks[0], { torrentId: "9876", authed: true });
+      assertThanked(tracker.clicks, clicksBefore, ["9876"], "the torrent must be thanked once");
     });
 
     await t.test("reuses the stored session and does not re-login", async () => {
+      const clicksBefore = tracker.clicks.length;
       await thank(siteId, "12345", username, password, site, "e2e");
 
       assert.equal(tracker.logins.length, 1, "second thank should reuse the session cookie");
-      assert.equal(tracker.clicks.length, 2);
-      assert.deepEqual(tracker.clicks[1], { torrentId: "12345", authed: true });
+      assertThanked(
+        tracker.clicks,
+        clicksBefore,
+        ["12345"],
+        "the second torrent must be thanked once",
+      );
     });
 
     await t.test("persists the session to disk so a restart need not re-login", () => {
@@ -231,9 +261,15 @@ for (const livewire of [2, 3] as const) {
     // unchanged and rejects the duplicate call instead. Either way the torrent
     // must not be counted as thanked twice.
     await t.test("a torrent already thanked is not thanked again", async () => {
+      const clicksBefore = tracker.clicks.length;
       await thank(siteId, "9876", username, password, site, "e2e");
 
-      assert.equal(tracker.clicks.length, 2, "the duplicate must not reach the Site as a thanks");
+      assertThanked(
+        tracker.clicks,
+        clicksBefore,
+        [],
+        "the duplicate must not reach the Site as a thanks",
+      );
     });
   });
 }
