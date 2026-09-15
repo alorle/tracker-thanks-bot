@@ -20,27 +20,35 @@ function mask(value: string | undefined): string {
 }
 
 function logConfig(sites: SitesMap): void {
-  log("config", "Loaded environment config:");
-  log("config", `  WEBHOOK_PORT     = ${process.env.WEBHOOK_PORT ?? "(not set, default: 3000)"}`);
-  log("config", `  WEBHOOK_SECRET   = ${mask(process.env.WEBHOOK_SECRET)}`);
-  log("config", `  QBIT_URL         = ${process.env.QBIT_URL ?? "(not set)"}`);
-  log("config", `  QBIT_API_KEY     = ${mask(process.env.QBIT_API_KEY)}`);
-  log("config", `  QBIT_USERNAME    = ${process.env.QBIT_USERNAME ?? "(not set)"}`);
-  log("config", `  QBIT_PASSWORD    = ${mask(process.env.QBIT_PASSWORD)}`);
-  log(
-    "config",
-    `  SITES_CONFIG_PATH = ${process.env.SITES_CONFIG_PATH ?? "(not set, using default)"}`,
-  );
-  for (const site of sites.values()) {
+  const siteVars: [string, string][] = [...sites.values()].flatMap((site) => {
     const base = envVarBase(site.id);
-    log("config", `  ${base}_USERNAME   = ${process.env[`${base}_USERNAME`] ?? "(not set)"}`);
-    log("config", `  ${base}_PASSWORD   = ${mask(process.env[`${base}_PASSWORD`])}`);
+    return [
+      [`${base}_USERNAME`, process.env[`${base}_USERNAME`] ?? "(not set)"],
+      [`${base}_PASSWORD`, mask(process.env[`${base}_PASSWORD`])],
+    ];
+  });
+
+  const entries: [string, string][] = [
+    ["WEBHOOK_PORT", process.env.WEBHOOK_PORT ?? "(not set, default: 3000)"],
+    ["WEBHOOK_SECRET", mask(process.env.WEBHOOK_SECRET)],
+    ["QBIT_URL", process.env.QBIT_URL ?? "(not set)"],
+    ["QBIT_API_KEY", mask(process.env.QBIT_API_KEY)],
+    ["QBIT_USERNAME", process.env.QBIT_USERNAME ?? "(not set)"],
+    ["QBIT_PASSWORD", mask(process.env.QBIT_PASSWORD)],
+    ["SITES_CONFIG_PATH", process.env.SITES_CONFIG_PATH ?? "(not set, using default)"],
+    ...siteVars,
+    ["CACHE_DIR", process.env.CACHE_DIR ?? "(not set)"],
+    ["THANKS_ENGINE", getThanksEngine()],
+    ["SCAN_ENABLED", process.env.SCAN_ENABLED ?? "(not set, default: true)"],
+    ["SCAN_HOUR", process.env.SCAN_HOUR ?? "(not set, default: 3)"],
+    ["SCAN_ON_START", process.env.SCAN_ON_START ?? "(not set, default: false)"],
+  ];
+  const width = Math.max(...entries.map(([name]) => name.length));
+
+  log("config", "Loaded environment config:");
+  for (const [name, value] of entries) {
+    log("config", `  ${name.padEnd(width)} = ${value}`);
   }
-  log("config", `  CACHE_DIR        = ${process.env.CACHE_DIR ?? "(not set)"}`);
-  log("config", `  THANKS_ENGINE    = ${getThanksEngine()}`);
-  log("config", `  SCAN_ENABLED     = ${process.env.SCAN_ENABLED ?? "(not set, default: true)"}`);
-  log("config", `  SCAN_HOUR        = ${process.env.SCAN_HOUR ?? "(not set, default: 3)"}`);
-  log("config", `  SCAN_ON_START    = ${process.env.SCAN_ON_START ?? "(not set, default: false)"}`);
 }
 
 async function runCli(sites: SitesMap, siteKey: string, torrentIds: string[]): Promise<void> {
