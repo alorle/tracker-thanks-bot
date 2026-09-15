@@ -9,15 +9,13 @@ import {
   logins,
 } from "./metrics.ts";
 
-export async function ensureLoggedIn(
+async function login(
   page: Page,
   username: string,
   password: string,
   site: SiteConfig,
   logPrefix: string,
 ): Promise<void> {
-  if (!page.url().includes("/login")) return;
-
   log(logPrefix, "Login required. Submitting credentials...");
 
   await page.locator('input[name="username"]').fill(username);
@@ -52,7 +50,7 @@ export async function thankTorrent(
     await page.goto(url);
 
     if (page.url().includes("/login")) {
-      await ensureLoggedIn(page, username, password, site, logPrefix);
+      await login(page, username, password, site, logPrefix);
       await page.goto(url);
     }
 
