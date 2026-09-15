@@ -114,15 +114,12 @@ export function loadSites(path: string = getSitesConfigPath()): SitesMap {
     }
     seenBaseUrls.set(baseUrl, id);
 
-    let loginButtonSelector = DEFAULT_LOGIN_BUTTON_SELECTOR;
-    if (entry.login_button_selector !== undefined) {
-      if (
-        typeof entry.login_button_selector !== "string" ||
-        entry.login_button_selector.length === 0
-      ) {
-        fail(`Site "${id}" field "login_button_selector" must be a non-empty string.`);
-      }
-      loginButtonSelector = entry.login_button_selector;
+    const loginButtonSelector =
+      entry.login_button_selector === undefined
+        ? DEFAULT_LOGIN_BUTTON_SELECTOR
+        : entry.login_button_selector;
+    if (typeof loginButtonSelector !== "string" || loginButtonSelector.length === 0) {
+      fail(`Site "${id}" field "login_button_selector" must be a non-empty string.`);
     }
 
     map.set(id, { id, baseUrl, loginButtonSelector });
