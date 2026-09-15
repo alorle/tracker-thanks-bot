@@ -11,14 +11,16 @@ export type FakeQBittorrent = {
 
 export function startFakeQBittorrent({
   torrents,
-  alwaysForbidden = false,
+  forbidden,
 }: {
   torrents?: Map<string, FakeTorrent>;
-  alwaysForbidden?: boolean;
+  /** Reject data requests with 403: "once" recovers after a re-login, "always" never does. */
+  forbidden?: "always" | "once";
 } = {}): Promise<FakeQBittorrent> {
   // torrents: Map<hash, { name, comment }>
   const store = torrents ?? new Map<string, FakeTorrent>();
   const requests: string[] = [];
+  let forbidNext = forbidden !== undefined;
 
   const server = createServer((req, res) => {
     const reqUrl = new URL(req.url ?? "/", "http://127.0.0.1");
@@ -33,7 +35,8 @@ export function startFakeQBittorrent({
       return;
     }
 
-    if (alwaysForbidden) {
+    if (forbidNext) {
+      if (forbidden === "once") forbidNext = false;
       res.writeHead(403, { "Content-Type": "text/plain" });
       res.end("Forbidden");
       return;
