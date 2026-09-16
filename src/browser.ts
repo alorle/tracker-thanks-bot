@@ -2,7 +2,7 @@ import { join } from "node:path";
 import { chromium } from "playwright";
 import type { BrowserContext, Page } from "playwright";
 
-const queues = new Map<string, Promise<void>>();
+const queues = new Map<string, Promise<unknown>>();
 
 export type BrowserContexts = {
   getContext: (siteKey: string) => Promise<BrowserContext>;
@@ -58,7 +58,7 @@ export function createBrowserContexts(cacheDir: string): BrowserContexts {
  * Enqueue work for a site to prevent concurrent Playwright operations.
  * Returns a promise that resolves when the enqueued work completes.
  */
-export function enqueue(siteKey: string, work: () => Promise<void>): Promise<void> {
+export function enqueue<T>(siteKey: string, work: () => Promise<T>): Promise<T> {
   const prev = queues.get(siteKey) ?? Promise.resolve();
   const next = prev.then(work, () => work());
   queues.set(siteKey, next);

@@ -1,13 +1,9 @@
 import type { Page } from "playwright";
-import { envVarBase, type Site } from "./config.ts";
+import type { Site } from "./config.ts";
 import { log } from "./log.ts";
-import {
-  torrentsThanked,
-  torrentsSkipped,
-  torrentsErrored,
-  thankDuration,
-  logins,
-} from "./metrics.ts";
+import type { BrowserContexts } from "./browser.ts";
+import { LoginFailedError, type ThanksAdapter } from "./thank.ts";
+import { logins } from "./metrics.ts";
 
 async function login(page: Page, site: Site, logPrefix: string): Promise<void> {
   log(logPrefix, "Login required. Submitting credentials...");
@@ -19,23 +15,16 @@ async function login(page: Page, site: Site, logPrefix: string): Promise<void> {
 
   if (page.url().includes("/login")) {
     logins.inc({ site: site.id, status: "failure" });
-    const base = envVarBase(site.id);
-    throw new Error(`Login failed. Check your ${base}_USERNAME and ${base}_PASSWORD.`);
+    throw new LoginFailedError(site);
   }
 
   logins.inc({ site: site.id, status: "success" });
   log(logPrefix, "Login successful.");
 }
 
-export async function thankTorrent(
-  page: Page,
-  torrentId: string,
-  site: Site,
-  logPrefix: string,
-): Promise<void> {
-  const stopTimer = thankDuration.startTimer({ site: site.id });
-
-  try {
+export function createBrowserThanks(contexts: BrowserContexts): ThanksAdapter {
+  return async function thankTorrent(torrentId, site, logPrefix) {
+    const page = await contexts.freshPage(site.id);
     const url = `${site.baseUrl}/torrents/${torrentId}`;
     log(logPrefix, `Navigating to torrent ${torrentId}...`);
 
@@ -58,9 +47,7 @@ export async function thankTorrent(
       .filter({ hasText: "Agradecer" });
 
     if ((await matches.count()) === 0) {
-      log(logPrefix, `No thanks button found for torrent ${torrentId}. Skipping.`);
-      torrentsSkipped.inc({ site: site.id, reason: "no_button" });
-      return;
+      return { status: "skipped", reason: "no_button" };
     }
 
     // Several matches would make the strict-mode calls below throw rather than
@@ -68,21 +55,13 @@ export async function thankTorrent(
     const thanksButton = matches.first();
 
     if (await thanksButton.isDisabled()) {
-      log(logPrefix, `Torrent ${torrentId} already thanked. Skipping.`);
-      torrentsSkipped.inc({ site: site.id, reason: "already_thanked" });
-      return;
+      return { status: "skipped", reason: "already_thanked" };
     }
 
     const [response] = await Promise.all([
       page.waitForResponse((res) => res.url().includes("/livewire")),
       thanksButton.click(),
     ]);
-    torrentsThanked.inc({ site: site.id });
-    log(logPrefix, `Thanked torrent ${torrentId}. (status: ${response.status()})`);
-  } catch (err) {
-    torrentsErrored.inc({ site: site.id });
-    throw err;
-  } finally {
-    stopTimer();
-  }
+    return { status: "thanked", detail: `status: ${response.status()}` };
+  };
 }
