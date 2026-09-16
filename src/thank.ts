@@ -54,7 +54,7 @@ function record(outcome: ThanksOutcome, site: Site, torrentId: string, logPrefix
 }
 
 export type Thanks = {
-  thank: (target: ThankTarget) => Promise<void>;
+  thank: (target: ThankTarget) => Promise<ThanksOutcome>;
   drainAll: () => Promise<void>;
   closeAll: () => Promise<void>;
 };
@@ -72,13 +72,15 @@ export function createThanks(
    * The queue is what keeps two grabs on the same Site from logging in at once,
    * whichever engine is active.
    */
-  function thank({ site, torrentId }: ThankTarget): Promise<void> {
+  function thank({ site, torrentId }: ThankTarget): Promise<ThanksOutcome> {
     const logPrefix = `auto-thanks:${site.id}`;
     return enqueue(site.id, async () => {
       const engine = config.thanksEngine === "http" ? thankOverHttp : thankOverBrowser;
       const stopTimer = thankDuration.startTimer({ site: site.id });
       try {
-        record(await engine(torrentId, site, logPrefix), site, torrentId, logPrefix);
+        const outcome = await engine(torrentId, site, logPrefix);
+        record(outcome, site, torrentId, logPrefix);
+        return outcome;
       } catch (err) {
         torrentsErrored.inc({ site: site.id });
         throw err;

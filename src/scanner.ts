@@ -53,8 +53,9 @@ export async function scanAllTorrents(
       if (siteTouched) await sleep(delayMs);
       siteTouched = true;
 
-      await thanks.thank(target);
-      thankedCount++;
+      const outcome = await thanks.thank(target);
+      if (outcome.status === "thanked") thankedCount++;
+      else skippedCount++;
     } catch (err) {
       log(PREFIX, `Error processing torrent "${torrent.name}": ${String(err)}`);
       errorCount++;
