@@ -8,7 +8,9 @@ torrent trackers after a torrent is grabbed by Radarr/Sonarr.
 **Site**:
 A private tracker installation that the **Operator** has an account on, identified
 by a single operator-chosen `id` (a stable slug used as cache directory name,
-metrics label, log prefix, and credential env var prefix).
+metrics label, log prefix, and credential env var prefix). The account is part of
+the Site rather than something looked up alongside it: a Site whose credentials are
+missing is refused at startup, so a configured Site always has an account.
 _Avoid_: tracker (ambiguous — see below), instance, host
 
 **Tracker**:
@@ -44,9 +46,9 @@ _Avoid_: like, upvote, ack
 > thank on?
 >
 > **Operator**: The torrent's comment in qBittorrent contains the Site's URL
-> and a torrent ID. We match the URL against each configured Site's `base_url`
-> and use that Site's `id` to look up credentials and route to the per-Site
-> browser context.
+> and a torrent ID. We match the URL against each configured Site's `base_url`,
+> and that Site is everything the Thanks needs — its account came with it when
+> it was loaded. The `id` is what serializes the Thanks against that one Site.
 >
 > **Dev**: So the Engine isn't part of the routing decision?
 >
