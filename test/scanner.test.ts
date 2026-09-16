@@ -39,7 +39,7 @@ void test("the scan paces its calls to the Site", async (t) => {
   delete process.env.QBIT_API_KEY;
   process.env.SCAN_DELAY_MS = "300";
 
-  const { loadSites } = await import("../src/config.ts");
+  const { loadConfig } = await import("../src/config.ts");
   const { QBittorrentClient } = await import("../src/qbittorrent.ts");
   const { scanAllTorrents } = await import("../src/scanner.ts");
 
@@ -52,7 +52,13 @@ void test("the scan paces its calls to the Site", async (t) => {
 
   const scansBefore = await metricValue("tracker_scans_completed_total", { status: "success" });
   const startedAt = Date.now();
-  await scanAllTorrents(loadSites(), QBittorrentClient.fromEnv());
+  const config = loadConfig();
+  assert.ok(config.qbittorrent, "expected the fake qBittorrent in the config");
+  await scanAllTorrents(
+    config.sites,
+    new QBittorrentClient(config.qbittorrent),
+    config.scan.delayMs,
+  );
 
   assert.equal(tracker.clicks.length, 2, "both matching torrents must be thanked");
   const [first, second] = tracker.clicks;

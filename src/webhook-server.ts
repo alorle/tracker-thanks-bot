@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { timingSafeEqual } from "node:crypto";
 import { log } from "./log.ts";
-import type { SitesMap } from "./config.ts";
+import type { Config, SitesMap } from "./config.ts";
 import type { QBittorrentClient } from "./qbittorrent.ts";
 import { drainAll, closeAll } from "./browser.ts";
 import { thank } from "./thank.ts";
@@ -170,10 +170,10 @@ async function gracefulShutdown(signal: string, server: Server): Promise<void> {
 
 export async function startServer(
   sites: SitesMap,
-  port: number,
+  webhook: Config["webhook"],
   qbClient: QBittorrentClient,
 ): Promise<Server> {
-  const webhookSecret = process.env.WEBHOOK_SECRET ?? null;
+  const { port, secret: webhookSecret } = webhook;
   if (!webhookSecret) {
     log(PREFIX, "WARNING: WEBHOOK_SECRET not set — /webhook/* endpoints are unauthenticated.");
   }

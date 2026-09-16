@@ -23,7 +23,7 @@ async function startBot(
   const sitesPath = join(tmpDir, "sites.json");
   writeFileSync(sitesPath, JSON.stringify({ sites: [{ id: siteId, base_url: baseUrl }] }));
 
-  const { loadSites, envVarBase } = await import("../src/config.ts");
+  const { loadConfig, envVarBase } = await import("../src/config.ts");
   const { QBittorrentClient } = await import("../src/qbittorrent.ts");
   const { startServer } = await import("../src/webhook-server.ts");
 
@@ -40,7 +40,13 @@ async function startBot(
   if (secret === undefined) delete process.env.WEBHOOK_SECRET;
   else process.env.WEBHOOK_SECRET = secret;
 
-  const server = await startServer(loadSites(), 0, QBittorrentClient.fromEnv());
+  const config = loadConfig();
+  assert.ok(config.qbittorrent, "expected the fake qBittorrent in the config");
+  const server = await startServer(
+    config.sites,
+    { port: 0, secret: config.webhook.secret },
+    new QBittorrentClient(config.qbittorrent),
+  );
   const address = server.address();
 
   t.after(async () => {

@@ -1,4 +1,4 @@
-import { loadSites, getScanConfig, envVarBase, type SitesMap } from "./config.ts";
+import { loadConfig, getCacheDir, envVarBase, type Config, type SitesMap } from "./config.ts";
 import { log } from "./log.ts";
 import { closeAll } from "./browser.ts";
 import { thank, getThanksEngine } from "./thank.ts";
@@ -13,29 +13,31 @@ function mask(value: string | undefined): string {
   return value.slice(0, 2) + "****" + value.slice(-2);
 }
 
-function logConfig(sites: SitesMap): void {
-  const siteVars: [string, string][] = [...sites.values()].flatMap((site) => {
+function logConfig(config: Config): void {
+  const siteVars: [string, string][] = [...config.sites.values()].flatMap((site) => {
     const base = envVarBase(site.id);
     return [
-      [`${base}_USERNAME`, process.env[`${base}_USERNAME`] ?? "(not set)"],
-      [`${base}_PASSWORD`, mask(process.env[`${base}_PASSWORD`])],
+      [`${base}_USERNAME`, site.username],
+      [`${base}_PASSWORD`, mask(site.password)],
     ];
   });
 
+  const qbit = config.qbittorrent;
+  const credentials = qbit?.credentials;
   const entries: [string, string][] = [
-    ["WEBHOOK_PORT", process.env.WEBHOOK_PORT ?? "(not set, default: 3000)"],
-    ["WEBHOOK_SECRET", mask(process.env.WEBHOOK_SECRET)],
-    ["QBIT_URL", process.env.QBIT_URL ?? "(not set)"],
-    ["QBIT_API_KEY", mask(process.env.QBIT_API_KEY)],
-    ["QBIT_USERNAME", process.env.QBIT_USERNAME ?? "(not set)"],
-    ["QBIT_PASSWORD", mask(process.env.QBIT_PASSWORD)],
-    ["SITES_CONFIG_PATH", process.env.SITES_CONFIG_PATH ?? "(not set, using default)"],
+    ["WEBHOOK_PORT", String(config.webhook.port)],
+    ["WEBHOOK_SECRET", mask(config.webhook.secret ?? undefined)],
+    ["QBIT_URL", qbit?.baseUrl ?? "(not set)"],
+    ["QBIT_API_KEY", mask(credentials?.mode === "apikey" ? credentials.apiKey : undefined)],
+    ["QBIT_USERNAME", credentials?.mode === "cookie" ? credentials.username : "(not set)"],
+    ["QBIT_PASSWORD", mask(credentials?.mode === "cookie" ? credentials.password : undefined)],
+    ["SITES_CONFIG_PATH", config.sitesPath],
     ...siteVars,
-    ["CACHE_DIR", process.env.CACHE_DIR ?? "(not set)"],
+    ["CACHE_DIR", getCacheDir()],
     ["THANKS_ENGINE", getThanksEngine()],
-    ["SCAN_ENABLED", process.env.SCAN_ENABLED ?? "(not set, default: true)"],
-    ["SCAN_HOUR", process.env.SCAN_HOUR ?? "(not set, default: 3)"],
-    ["SCAN_ON_START", process.env.SCAN_ON_START ?? "(not set, default: false)"],
+    ["SCAN_ENABLED", String(config.scan.enabled)],
+    ["SCAN_HOUR", String(config.scan.hour)],
+    ["SCAN_ON_START", String(config.scan.onStart)],
   ];
   const width = Math.max(...entries.map(([name]) => name.length));
 
@@ -73,21 +75,27 @@ async function runCli(sites: SitesMap, siteKey: string, torrentIds: string[]): P
   log(logPrefix, "Done.");
 }
 
+function qbittorrentClient(config: Config): QBittorrentClient {
+  if (!config.qbittorrent) {
+    throw new Error("Required environment variable QBIT_URL is not set.");
+  }
+  return new QBittorrentClient(config.qbittorrent);
+}
+
 async function main(): Promise<void> {
-  const sites = loadSites();
-  logConfig(sites);
+  const config = loadConfig();
+  logConfig(config);
+  const { sites, scan } = config;
   const [command, ...rest] = process.argv.slice(2);
 
   if (command === "serve") {
-    const port = Number(process.env.WEBHOOK_PORT ?? "3000");
-    const scanConfig = getScanConfig();
-    const qbClient = QBittorrentClient.fromEnv();
-    await startServer(sites, port, qbClient);
+    const qbClient = qbittorrentClient(config);
+    await startServer(sites, config.webhook, qbClient);
 
-    if (scanConfig.enabled) {
-      scheduleDaily(scanConfig.hour, () => scanAllTorrents(sites, qbClient));
-      if (scanConfig.onStart) {
-        scanAllTorrents(sites, qbClient).catch((err) =>
+    if (scan.enabled) {
+      scheduleDaily(scan.hour, () => scanAllTorrents(sites, qbClient, scan.delayMs));
+      if (scan.onStart) {
+        scanAllTorrents(sites, qbClient, scan.delayMs).catch((err) =>
           log("scanner", `Initial scan failed: ${err}`),
         );
       }
@@ -96,9 +104,9 @@ async function main(): Promise<void> {
   }
 
   if (command === "scan") {
-    const qbClient = QBittorrentClient.fromEnv();
+    const qbClient = qbittorrentClient(config);
     try {
-      await scanAllTorrents(sites, qbClient);
+      await scanAllTorrents(sites, qbClient, scan.delayMs);
     } finally {
       await closeAll();
     }

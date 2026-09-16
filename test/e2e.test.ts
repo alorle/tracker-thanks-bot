@@ -76,7 +76,7 @@ void test("operator config drives the full grab → thanks flow", async (t) => {
   process.env.QBIT_PASSWORD = "qbit-pw";
   delete process.env.QBIT_API_KEY;
 
-  const { loadSites } = await import("../src/config.ts");
+  const { loadConfig } = await import("../src/config.ts");
   const { parseTorrentComment } = await import("../src/url-parser.ts");
   const { QBittorrentClient } = await import("../src/qbittorrent.ts");
   const { freshPage, enqueue, closeAll } = await import("../src/browser.ts");
@@ -91,7 +91,7 @@ void test("operator config drives the full grab → thanks flow", async (t) => {
   });
 
   await t.test("loads the operator-supplied Site from sites.json", () => {
-    const sites = loadSites();
+    const sites = loadConfig().sites;
     assert.equal(sites.size, 1);
     const site = sites.get("fake-site");
     assert.ok(site, "expected site keyed by configured id");
@@ -101,26 +101,27 @@ void test("operator config drives the full grab → thanks flow", async (t) => {
   });
 
   await t.test("identifies the Site from a qBittorrent comment", async () => {
-    const sites = loadSites();
-    const qbClient = QBittorrentClient.fromEnv();
+    const config = loadConfig();
+    assert.ok(config.qbittorrent, "expected the fake qBittorrent in the config");
+    const qbClient = new QBittorrentClient(config.qbittorrent);
     const comment = await qbClient.getTorrentComment(torrentHash);
     assert.match(comment, /\/torrents\/9876/);
 
-    const parsed = parseTorrentComment(sites, comment);
+    const parsed = parseTorrentComment(config.sites, comment);
     assert.ok(parsed, "expected parser to match the configured base_url");
     assert.equal(parsed.site.id, "fake-site");
     assert.equal(parsed.torrentId, trackerTorrentId);
   });
 
   await t.test("derives credentials from the Site id", () => {
-    const site = loadSites().get("fake-site");
+    const site = loadConfig().sites.get("fake-site");
     assert.ok(site, "expected configured site");
     assert.equal(site.username, "operator-user");
     assert.equal(site.password, "operator-pw");
   });
 
   await t.test("logs into the tracker and clicks the thanks button", async () => {
-    const sites = loadSites();
+    const sites = loadConfig().sites;
     const site = sites.get("fake-site");
     assert.ok(site, "expected configured site");
 
@@ -139,7 +140,7 @@ void test("operator config drives the full grab → thanks flow", async (t) => {
   });
 
   await t.test("reuses the persistent session and does not re-login", async () => {
-    const sites = loadSites();
+    const sites = loadConfig().sites;
     const site = sites.get("fake-site");
     assert.ok(site, "expected configured site");
 
@@ -162,7 +163,7 @@ void test("operator config drives the full grab → thanks flow", async (t) => {
   // the crashed page stayed cached and Playwright cannot revive one. Every
   // navigation after it failed with "Page crashed" until the process restarted.
   await t.test("a crashed page does not poison the next torrent", async () => {
-    const sites = loadSites();
+    const sites = loadConfig().sites;
     const site = sites.get("fake-site");
     assert.ok(site, "expected configured site");
 
@@ -212,7 +213,7 @@ for (const livewire of [2, 3] as const) {
     process.env[`${siteId.toUpperCase().replaceAll("-", "_")}_USERNAME`] = "operator-user";
     process.env[`${siteId.toUpperCase().replaceAll("-", "_")}_PASSWORD`] = "operator-pw";
 
-    const { loadSites } = await import("../src/config.ts");
+    const { loadConfig } = await import("../src/config.ts");
     const { thank } = await import("../src/thank.ts");
 
     t.after(async () => {
@@ -221,7 +222,7 @@ for (const livewire of [2, 3] as const) {
       process.env = originalEnv;
     });
 
-    const sites = loadSites();
+    const sites = loadConfig().sites;
     const site = sites.get(siteId);
     assert.ok(site, "expected configured site");
 
@@ -373,8 +374,8 @@ async function configureSite(
     process.env = originalEnv;
   });
 
-  const { loadSites } = await import("../src/config.ts");
-  const site = loadSites().get(siteId);
+  const { loadConfig } = await import("../src/config.ts");
+  const site = loadConfig().sites.get(siteId);
   assert.ok(site, "expected the configured site");
   return site;
 }

@@ -1,6 +1,6 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import { log } from "./log.ts";
-import { getScanConfig, type SitesMap } from "./config.ts";
+import type { SitesMap } from "./config.ts";
 import { thank } from "./thank.ts";
 import { parseTorrentComment } from "./url-parser.ts";
 import type { QBittorrentClient } from "./qbittorrent.ts";
@@ -8,10 +8,13 @@ import { scansCompleted, scanDuration, scanTorrentsProcessed } from "./metrics.t
 
 const PREFIX = "scanner";
 
-export async function scanAllTorrents(sites: SitesMap, qbClient: QBittorrentClient): Promise<void> {
+export async function scanAllTorrents(
+  sites: SitesMap,
+  qbClient: QBittorrentClient,
+  delayMs: number,
+): Promise<void> {
   log(PREFIX, "Starting torrent scan...");
   const stopTimer = scanDuration.startTimer();
-  const { delayMs } = getScanConfig();
 
   const torrents = await qbClient.listTorrents();
   log(PREFIX, `Found ${torrents.length} torrent(s) in qBittorrent.`);

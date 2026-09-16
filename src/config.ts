@@ -1,5 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { log } from "./log.ts";
+import type { QBittorrentConfig } from "./qbittorrent.ts";
 
 export type Site = {
   id: string;
@@ -12,6 +14,14 @@ export type Site = {
 export type SitesMap = Map<string, Site>;
 
 type SiteSettings = Omit<Site, "username" | "password">;
+
+export type Config = {
+  sitesPath: string;
+  sites: SitesMap;
+  qbittorrent: QBittorrentConfig | null;
+  webhook: { port: number; secret: string | null };
+  scan: { enabled: boolean; hour: number; onStart: boolean; delayMs: number };
+};
 
 const ID_REGEX = /^[a-z][a-z0-9-]{0,31}$/;
 const RESERVED_IDS = new Set([
@@ -57,15 +67,12 @@ function normalizeBaseUrl(raw: string, id: string): string {
   return normalized.endsWith("/") ? normalized.slice(0, -1) : normalized;
 }
 
-export function getSitesConfigPath(): string {
-  if (process.env.SITES_CONFIG_PATH) return process.env.SITES_CONFIG_PATH;
+function sitesConfigPath(env: NodeJS.ProcessEnv): string {
+  if (env.SITES_CONFIG_PATH) return env.SITES_CONFIG_PATH;
   return join(import.meta.dirname, "..", "config", "sites.json");
 }
 
-export function loadSites(
-  path: string = getSitesConfigPath(),
-  env: NodeJS.ProcessEnv = process.env,
-): SitesMap {
+export function loadSites(path: string, env: NodeJS.ProcessEnv): SitesMap {
   let raw: string;
   try {
     raw = readFileSync(path, "utf-8");
@@ -149,8 +156,8 @@ export function loadSites(
   return sites;
 }
 
-export function getRequiredEnv(name: string): string {
-  const value = process.env[name];
+function requiredEnv(env: NodeJS.ProcessEnv, name: string): string {
+  const value = env[name];
   if (!value) {
     throw new Error(`Required environment variable ${name} is not set.`);
   }
@@ -161,28 +168,57 @@ export function getCacheDir(): string {
   return process.env.CACHE_DIR ?? join(import.meta.dirname, "..", ".cache");
 }
 
-export function getScanConfig(): {
-  enabled: boolean;
-  hour: number;
-  onStart: boolean;
-  delayMs: number;
-} {
-  const rawHour = process.env.SCAN_HOUR || "3";
+function qbittorrentConfig(env: NodeJS.ProcessEnv): QBittorrentConfig | null {
+  const baseUrl = env.QBIT_URL;
+  if (!baseUrl) return null;
+
+  const apiKey = env.QBIT_API_KEY;
+  if (apiKey) {
+    log("qbittorrent", "Using API key authentication (v5.2.0+).");
+    return { baseUrl, credentials: { mode: "apikey", apiKey } };
+  }
+
+  return {
+    baseUrl,
+    credentials: {
+      mode: "cookie",
+      username: requiredEnv(env, "QBIT_USERNAME"),
+      password: requiredEnv(env, "QBIT_PASSWORD"),
+    },
+  };
+}
+
+function scanConfig(env: NodeJS.ProcessEnv): Config["scan"] {
+  const rawHour = env.SCAN_HOUR || "3";
   const hour = Number(rawHour);
   if (!Number.isInteger(hour) || hour < 0 || hour > 23) {
     fail(`SCAN_HOUR must be an integer between 0 and 23, got "${rawHour}".`);
   }
 
-  const rawDelay = process.env.SCAN_DELAY_MS || "1000";
+  const rawDelay = env.SCAN_DELAY_MS || "1000";
   const delayMs = Number(rawDelay);
   if (!Number.isInteger(delayMs) || delayMs < 0) {
     fail(`SCAN_DELAY_MS must be a non-negative integer, got "${rawDelay}".`);
   }
 
   return {
-    enabled: process.env.SCAN_ENABLED !== "false",
+    enabled: env.SCAN_ENABLED !== "false",
     hour,
-    onStart: process.env.SCAN_ON_START === "true",
+    onStart: env.SCAN_ON_START === "true",
     delayMs,
+  };
+}
+
+export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
+  const sitesPath = sitesConfigPath(env);
+  return {
+    sitesPath,
+    sites: loadSites(sitesPath, env),
+    qbittorrent: qbittorrentConfig(env),
+    webhook: {
+      port: Number(env.WEBHOOK_PORT ?? "3000"),
+      secret: env.WEBHOOK_SECRET ?? null,
+    },
+    scan: scanConfig(env),
   };
 }
