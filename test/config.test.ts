@@ -205,6 +205,55 @@ void test("an unusable WEBHOOK_PORT is rejected instead of opening a random one"
   assert.equal(loadConfig(env).webhook.port, 3000);
 });
 
+void test("only the exact word http selects the browserless engine", (t) => {
+  const env = configEnv(t);
+
+  assert.equal(loadConfig({ ...env, THANKS_ENGINE: "http" }).thanksEngine, "http");
+  assert.equal(loadConfig({ ...env, THANKS_ENGINE: "browser" }).thanksEngine, "browser");
+  assert.equal(loadConfig({ ...env, THANKS_ENGINE: "HTTP" }).thanksEngine, "browser");
+  assert.equal(loadConfig({ ...env, THANKS_ENGINE: "" }).thanksEngine, "browser");
+  assert.equal(loadConfig(env).thanksEngine, "browser");
+});
+
+void test("qBittorrent is configured from an API key, from a password, or not at all", (t) => {
+  const env = configEnv(t);
+  const url = "http://qbit.example.com:8080";
+
+  assert.equal(loadConfig(env).qbittorrent, null, "no QBIT_URL means no qBittorrent to talk to");
+
+  assert.deepEqual(loadConfig({ ...env, QBIT_URL: url, QBIT_API_KEY: "the-key" }).qbittorrent, {
+    baseUrl: url,
+    credentials: { mode: "apikey", apiKey: "the-key" },
+  });
+
+  assert.deepEqual(
+    loadConfig({ ...env, QBIT_URL: url, QBIT_USERNAME: "qbit-user", QBIT_PASSWORD: "qbit-pw" })
+      .qbittorrent,
+    { baseUrl: url, credentials: { mode: "cookie", username: "qbit-user", password: "qbit-pw" } },
+  );
+
+  assert.deepEqual(
+    loadConfig({
+      ...env,
+      QBIT_URL: url,
+      QBIT_API_KEY: "the-key",
+      QBIT_USERNAME: "qbit-user",
+      QBIT_PASSWORD: "qbit-pw",
+    }).qbittorrent?.credentials,
+    { mode: "apikey", apiKey: "the-key" },
+    "an API key wins over a password the Operator also left set",
+  );
+
+  assert.throws(
+    () => loadConfig({ ...env, QBIT_URL: url, QBIT_PASSWORD: "qbit-pw" }),
+    /QBIT_USERNAME/,
+  );
+  assert.throws(
+    () => loadConfig({ ...env, QBIT_URL: url, QBIT_USERNAME: "qbit-user" }),
+    /QBIT_PASSWORD/,
+  );
+});
+
 // Both switches are opt-out/opt-in by exact word: anything else keeps the
 // default, so that a typo cannot silently disable the nightly scan.
 void test("the scan switches read one exact word each", (t) => {
