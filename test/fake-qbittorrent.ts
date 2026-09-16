@@ -1,4 +1,4 @@
-import { createServer } from "node:http";
+import { createServer, type IncomingMessage } from "node:http";
 
 export type FakeTorrent = { name: string; comment: string };
 
@@ -12,15 +12,29 @@ export type FakeQBittorrent = {
 export function startFakeQBittorrent({
   torrents,
   forbidden,
+  apiKey,
+  emptyCommentAttempts = 0,
 }: {
   torrents?: Map<string, FakeTorrent>;
   /** Reject data requests with 403: "once" recovers after a re-login, "always" never does. */
   forbidden?: "always" | "once";
+  /** When set, the only accepted credential is this key as a Bearer token. */
+  apiKey?: string;
+  /** Serve an empty comment this many times first, as qBittorrent does while it still lacks the metadata. */
+  emptyCommentAttempts?: number;
 } = {}): Promise<FakeQBittorrent> {
   // torrents: Map<hash, { name, comment }>
   const store = torrents ?? new Map<string, FakeTorrent>();
   const requests: string[] = [];
+  const commentReads = new Map<string, number>();
   let forbidNext = forbidden !== undefined;
+
+  // qBittorrent authenticates every data request, so the fake does too: without
+  // this the client could send no credential at all and still be served.
+  const isAuthed = (req: IncomingMessage): boolean =>
+    apiKey === undefined
+      ? /(?:^|;\s*)SID=fakesid(?:;|$)/.test(req.headers.cookie ?? "")
+      : req.headers.authorization === `Bearer ${apiKey}`;
 
   const server = createServer((req, res) => {
     const reqUrl = new URL(req.url ?? "/", "http://127.0.0.1");
@@ -35,7 +49,7 @@ export function startFakeQBittorrent({
       return;
     }
 
-    if (forbidNext) {
+    if (forbidNext || !isAuthed(req)) {
       if (forbidden === "once") forbidNext = false;
       res.writeHead(403, { "Content-Type": "text/plain" });
       res.end("Forbidden");
@@ -43,15 +57,20 @@ export function startFakeQBittorrent({
     }
 
     if (reqUrl.pathname === "/api/v2/torrents/properties" && req.method === "GET") {
-      const hash = (reqUrl.searchParams.get("hash") ?? "").toLowerCase();
+      // Hashes are matched exactly: qBittorrent's own API is case sensitive, so
+      // a client that forwards Radarr's uppercase downloadId finds nothing.
+      const hash = reqUrl.searchParams.get("hash") ?? "";
       const torrent = store.get(hash);
       if (!torrent) {
         res.writeHead(404, { "Content-Type": "text/plain" });
         res.end("no such torrent");
         return;
       }
+      const read = (commentReads.get(hash) ?? 0) + 1;
+      commentReads.set(hash, read);
+      const comment = read <= emptyCommentAttempts ? "" : torrent.comment;
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ comment: torrent.comment }));
+      res.end(JSON.stringify({ comment }));
       return;
     }
 

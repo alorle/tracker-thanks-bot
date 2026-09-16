@@ -6,9 +6,9 @@ import tseslint from "typescript-eslint";
 import eslintConfigPrettier from "eslint-config-prettier";
 
 export default defineConfig(
-  // Replacement for .eslintignore — build output and deps.
+  // Replacement for .eslintignore — build output, deps and tool scratch space.
   {
-    ignores: ["dist/**", "node_modules/**"],
+    ignores: ["dist/**", "node_modules/**", ".stryker-tmp/**", "reports/**"],
   },
 
   // Base recommended rules for all JS/TS files.

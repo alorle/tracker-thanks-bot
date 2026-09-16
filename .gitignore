@@ -245,3 +245,7 @@ $RECYCLE.BIN/
 !.envrc
 .cache/
 config/sites.json
+
+# Stryker mutation testing output
+reports/
+.stryker-tmp/

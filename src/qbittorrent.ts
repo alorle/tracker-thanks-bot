@@ -140,8 +140,10 @@ export class QBittorrentClient {
 
   async getTorrentCommentWithRetry(
     hash: string,
-    maxAttempts = 5,
-    initialDelayMs = 5000,
+    {
+      maxAttempts = 5,
+      initialDelayMs = 5000,
+    }: { maxAttempts?: number; initialDelayMs?: number } = {},
   ): Promise<string> {
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
