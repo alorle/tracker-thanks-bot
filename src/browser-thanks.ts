@@ -2,13 +2,8 @@ import type { Page } from "playwright";
 import { envVarBase, type Site } from "./config.ts";
 import { log } from "./log.ts";
 import type { BrowserContexts } from "./browser.ts";
-import {
-  torrentsThanked,
-  torrentsSkipped,
-  torrentsErrored,
-  thankDuration,
-  logins,
-} from "./metrics.ts";
+import type { ThanksAdapter } from "./thank.ts";
+import { logins } from "./metrics.ts";
 
 async function login(page: Page, site: Site, logPrefix: string): Promise<void> {
   log(logPrefix, "Login required. Submitting credentials...");
@@ -28,62 +23,46 @@ async function login(page: Page, site: Site, logPrefix: string): Promise<void> {
   log(logPrefix, "Login successful.");
 }
 
-export type BrowserThanks = (torrentId: string, site: Site, logPrefix: string) => Promise<void>;
-
-export function createBrowserThanks(contexts: BrowserContexts): BrowserThanks {
+export function createBrowserThanks(contexts: BrowserContexts): ThanksAdapter {
   return async function thankTorrent(torrentId, site, logPrefix) {
     const page = await contexts.freshPage(site.id);
-    const stopTimer = thankDuration.startTimer({ site: site.id });
+    const url = `${site.baseUrl}/torrents/${torrentId}`;
+    log(logPrefix, `Navigating to torrent ${torrentId}...`);
 
-    try {
-      const url = `${site.baseUrl}/torrents/${torrentId}`;
-      log(logPrefix, `Navigating to torrent ${torrentId}...`);
+    await page.goto(url);
 
+    if (page.url().includes("/login")) {
+      await login(page, site, logPrefix);
       await page.goto(url);
-
-      if (page.url().includes("/login")) {
-        await login(page, site, logPrefix);
-        await page.goto(url);
-      }
-
-      await page.waitForLoadState("networkidle");
-
-      // Evaluated by the page, not by us: kept as an expression string so that
-      // nothing which rewrites this file (bundler, instrumentation) can ship code
-      // into the browser that only runs here.
-      await page.waitForFunction("typeof window.Livewire !== 'undefined'");
-
-      const matches = page
-        .locator(`button[wire\\:click="store(${torrentId})"]`)
-        .filter({ hasText: "Agradecer" });
-
-      if ((await matches.count()) === 0) {
-        log(logPrefix, `No thanks button found for torrent ${torrentId}. Skipping.`);
-        torrentsSkipped.inc({ site: site.id, reason: "no_button" });
-        return;
-      }
-
-      // Several matches would make the strict-mode calls below throw rather than
-      // thank the torrent, and any one of them performs the same Thanks.
-      const thanksButton = matches.first();
-
-      if (await thanksButton.isDisabled()) {
-        log(logPrefix, `Torrent ${torrentId} already thanked. Skipping.`);
-        torrentsSkipped.inc({ site: site.id, reason: "already_thanked" });
-        return;
-      }
-
-      const [response] = await Promise.all([
-        page.waitForResponse((res) => res.url().includes("/livewire")),
-        thanksButton.click(),
-      ]);
-      torrentsThanked.inc({ site: site.id });
-      log(logPrefix, `Thanked torrent ${torrentId}. (status: ${response.status()})`);
-    } catch (err) {
-      torrentsErrored.inc({ site: site.id });
-      throw err;
-    } finally {
-      stopTimer();
     }
+
+    await page.waitForLoadState("networkidle");
+
+    // Evaluated by the page, not by us: kept as an expression string so that
+    // nothing which rewrites this file (bundler, instrumentation) can ship code
+    // into the browser that only runs here.
+    await page.waitForFunction("typeof window.Livewire !== 'undefined'");
+
+    const matches = page
+      .locator(`button[wire\\:click="store(${torrentId})"]`)
+      .filter({ hasText: "Agradecer" });
+
+    if ((await matches.count()) === 0) {
+      return { status: "skipped", reason: "no_button" };
+    }
+
+    // Several matches would make the strict-mode calls below throw rather than
+    // thank the torrent, and any one of them performs the same Thanks.
+    const thanksButton = matches.first();
+
+    if (await thanksButton.isDisabled()) {
+      return { status: "skipped", reason: "already_thanked" };
+    }
+
+    const [response] = await Promise.all([
+      page.waitForResponse((res) => res.url().includes("/livewire")),
+      thanksButton.click(),
+    ]);
+    return { status: "thanked", detail: `status: ${response.status()}` };
   };
 }

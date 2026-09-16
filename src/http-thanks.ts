@@ -1,14 +1,9 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { envVarBase, type Site } from "./config.ts";
+import type { ThanksAdapter } from "./thank.ts";
 import { log } from "./log.ts";
-import {
-  torrentsThanked,
-  torrentsSkipped,
-  torrentsErrored,
-  thankDuration,
-  logins,
-} from "./metrics.ts";
+import { logins } from "./metrics.ts";
 
 const REQUEST_TIMEOUT_MS = 30_000;
 const MAX_REDIRECTS = 10;
@@ -265,9 +260,7 @@ async function callStore(
   return null;
 }
 
-export type HttpThanks = (torrentId: string, site: Site, logPrefix: string) => Promise<void>;
-
-export function createHttpThanks(cacheDir: string): HttpThanks {
+export function createHttpThanks(cacheDir: string): ThanksAdapter {
   const jars = new Map<string, Jar>();
 
   function jarPath(siteKey: string): string {
@@ -297,7 +290,6 @@ export function createHttpThanks(cacheDir: string): HttpThanks {
   }
 
   return async function thankTorrentHttp(torrentId, site, logPrefix) {
-    const stopTimer = thankDuration.startTimer({ site: site.id });
     const jar = loadJar(site.id);
 
     try {
@@ -315,17 +307,13 @@ export function createHttpThanks(cacheDir: string): HttpThanks {
 
       const button = findThankButton(page.body);
       if (!button) {
-        log(logPrefix, `No thanks button found for torrent ${torrentId}. Skipping.`);
-        torrentsSkipped.inc({ site: site.id, reason: "no_button" });
-        return;
+        return { status: "skipped", reason: "no_button" };
       }
 
       // Only Livewire 2 renders the button disabled once thanked; on Livewire 3
       // the Site rejects the duplicate call instead, handled below.
       if (button.disabled) {
-        log(logPrefix, `Torrent ${torrentId} already thanked. Skipping.`);
-        torrentsSkipped.inc({ site: site.id, reason: "already_thanked" });
-        return;
+        return { status: "skipped", reason: "already_thanked" };
       }
 
       const csrfToken = /<meta name="csrf-token" content="([^"]*)"/.exec(page.body)?.[1];
@@ -335,18 +323,11 @@ export function createHttpThanks(cacheDir: string): HttpThanks {
 
       const rejection = await callStore(jar, site, button, torrentId, csrfToken, url);
       if (rejection) {
-        log(logPrefix, `Site rejected thanks for torrent ${torrentId}: ${rejection}`);
-        torrentsSkipped.inc({ site: site.id, reason: "rejected" });
-        return;
+        return { status: "skipped", reason: "rejected", message: rejection };
       }
 
-      torrentsThanked.inc({ site: site.id });
-      log(logPrefix, `Thanked torrent ${torrentId}. (livewire v${button.livewire})`);
-    } catch (err) {
-      torrentsErrored.inc({ site: site.id });
-      throw err;
+      return { status: "thanked", detail: `livewire v${button.livewire}` };
     } finally {
-      stopTimer();
       saveJar(site.id, jar);
     }
   };
