@@ -31,7 +31,10 @@ one deployment.
 
 **Thanks**:
 The action of clicking the per-torrent "Agradecer" button on a Site. Always
-performed for a specific torrent on a specific Site.
+performed for a specific torrent on a specific Site. A Thanks either lands, is
+skipped because the Site offers no button or already counts one, or is refused
+by the Site with the button still on offer — a quota reached, a torrent that is
+not the Operator's.
 _Avoid_: like, upvote, ack
 
 ## Flagged ambiguities
