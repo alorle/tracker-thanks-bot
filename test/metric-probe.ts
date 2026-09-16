@@ -17,3 +17,21 @@ export async function metricValue(
   );
   return sample ? sample.value : 0;
 }
+
+export async function histogramCount(
+  name: string,
+  labels: Record<string, string> = {},
+): Promise<number> {
+  const metric = (await registry.getMetricsAsJSON()).find((entry) => entry.name === name);
+  const values = (metric?.values ?? []) as {
+    metricName?: string;
+    labels: Record<string, unknown>;
+    value: number;
+  }[];
+  const sample = values.find(
+    (candidate) =>
+      candidate.metricName === `${name}_count` &&
+      Object.entries(labels).every(([key, value]) => String(candidate.labels[key]) === value),
+  );
+  return sample ? sample.value : 0;
+}
