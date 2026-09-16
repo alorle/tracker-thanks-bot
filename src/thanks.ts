@@ -56,11 +56,10 @@ export async function thankTorrent(
 
     await page.waitForLoadState("networkidle");
 
-    // Runs in the browser context, where Livewire is attached to the global
-    // object. `globalThis` is `window` at runtime but is typed without the DOM lib.
-    await page.waitForFunction(
-      () => typeof (globalThis as { Livewire?: unknown }).Livewire !== "undefined",
-    );
+    // Evaluated by the page, not by us: kept as an expression string so that
+    // nothing which rewrites this file (bundler, instrumentation) can ship code
+    // into the browser that only runs here.
+    await page.waitForFunction("typeof window.Livewire !== 'undefined'");
 
     const matches = page
       .locator(`button[wire\\:click="store(${torrentId})"]`)
