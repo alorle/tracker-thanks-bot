@@ -1,37 +1,43 @@
-import { test } from "node:test";
+import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { getScanConfig, loadSites } from "../src/config.ts";
+import { loadConfig, loadSites } from "../src/config.ts";
+
+function configEnv(t: TestContext): NodeJS.ProcessEnv {
+  const tmpDir = mkdtempSync(join(tmpdir(), "thanks-bot-config-"));
+  t.after(() => rmSync(tmpDir, { recursive: true, force: true }));
+  const path = join(tmpDir, "sites.json");
+  writeFileSync(
+    path,
+    JSON.stringify({ sites: [{ id: "any", base_url: "https://a.example.com" }] }),
+  );
+  return { SITES_CONFIG_PATH: path, ANY_USERNAME: "operator-user", ANY_PASSWORD: "operator-pw" };
+}
 
 // A mistyped SCAN_HOUR used to reach the scheduler as NaN, which Node turns
 // into a 1ms timer: the daily scan then ran back to back forever, hammering
 // both qBittorrent and the Site.
 void test("an unusable SCAN_HOUR is rejected instead of scheduling a runaway scan", (t) => {
-  const original = process.env.SCAN_HOUR;
-  t.after(() => {
-    if (original === undefined) delete process.env.SCAN_HOUR;
-    else process.env.SCAN_HOUR = original;
-  });
+  const env = configEnv(t);
 
   for (const value of ["not-a-number", "3.5", "-1", "24"]) {
-    process.env.SCAN_HOUR = value;
-    assert.throws(() => getScanConfig(), /SCAN_HOUR/, `expected "${value}" to be rejected`);
+    assert.throws(
+      () => loadConfig({ ...env, SCAN_HOUR: value }),
+      /SCAN_HOUR/,
+      `expected "${value}" to be rejected`,
+    );
   }
 
   // The accepted edges matter as much as the rejected ones: a validation that
   // slipped one value would still pass a test that only tried 24 and -1.
-  process.env.SCAN_HOUR = "0";
-  assert.equal(getScanConfig().hour, 0);
-  process.env.SCAN_HOUR = "23";
-  assert.equal(getScanConfig().hour, 23);
+  assert.equal(loadConfig({ ...env, SCAN_HOUR: "0" }).scan.hour, 0);
+  assert.equal(loadConfig({ ...env, SCAN_HOUR: "23" }).scan.hour, 23);
 
   // An unset variable and one left blank in .env both mean "use the default".
-  process.env.SCAN_HOUR = "";
-  assert.equal(getScanConfig().hour, 3);
-  delete process.env.SCAN_HOUR;
-  assert.equal(getScanConfig().hour, 3);
+  assert.equal(loadConfig({ ...env, SCAN_HOUR: "" }).scan.hour, 3);
+  assert.equal(loadConfig(env).scan.hour, 3);
 });
 
 // sites.json is hand-written by the Operator, and an id is not just a label:
@@ -107,15 +113,20 @@ void test("a sites.json the Operator got wrong is refused at load time", (t) => 
       { sites: [{ id: "broken", base_url: "https://a.example.com", login_button_selector: "" }] },
       /must be a non-empty string/,
     ],
+    [
+      "a login_button_selector that is not a string",
+      { sites: [{ id: "broken", base_url: "https://a.example.com", login_button_selector: 7 }] },
+      /must be a non-empty string/,
+    ],
   ];
 
   for (const [what, contents, expected] of refused) {
     const path = write(JSON.stringify(contents));
-    assert.throws(() => loadSites(path), expected, `expected ${what} to be refused`);
+    assert.throws(() => loadSites(path, {}), expected, `expected ${what} to be refused`);
   }
 
-  assert.throws(() => loadSites(write("{ not json")), /is not valid JSON/);
-  assert.throws(() => loadSites(join(tmpDir, "absent.json")), /Sites config not found/);
+  assert.throws(() => loadSites(write("{ not json"), {}), /is not valid JSON/);
+  assert.throws(() => loadSites(join(tmpDir, "absent.json"), {}), /Sites config not found/);
 });
 
 // Credentials are looked up from env vars derived from the id, so a Site whose
@@ -129,21 +140,21 @@ void test("a Site whose credential env vars are missing is refused", (t) => {
     JSON.stringify({ sites: [{ id: "needs-creds", base_url: "https://tracker.example.com" }] }),
   );
 
-  const originalEnv = { ...process.env };
-  t.after(() => {
-    rmSync(tmpDir, { recursive: true, force: true });
-    process.env = originalEnv;
-  });
+  t.after(() => rmSync(tmpDir, { recursive: true, force: true }));
 
-  delete process.env.NEEDS_CREDS_USERNAME;
-  delete process.env.NEEDS_CREDS_PASSWORD;
-  assert.throws(() => loadSites(path), /NEEDS_CREDS_USERNAME, NEEDS_CREDS_PASSWORD/);
+  assert.throws(() => loadSites(path, {}), /NEEDS_CREDS_USERNAME, NEEDS_CREDS_PASSWORD/);
 
-  process.env.NEEDS_CREDS_USERNAME = "operator-user";
-  assert.throws(() => loadSites(path), /credential env vars: NEEDS_CREDS_PASSWORD/);
+  assert.throws(
+    () => loadSites(path, { NEEDS_CREDS_USERNAME: "operator-user" }),
+    /credential env vars: NEEDS_CREDS_PASSWORD/,
+  );
 
-  process.env.NEEDS_CREDS_PASSWORD = "operator-pw";
-  assert.equal(loadSites(path).size, 1, "both vars set, the Site must load");
+  const site = loadSites(path, {
+    NEEDS_CREDS_USERNAME: "operator-user",
+    NEEDS_CREDS_PASSWORD: "operator-pw",
+  }).get("needs-creds");
+  assert.equal(site?.username, "operator-user", "the loaded Site must carry its credentials");
+  assert.equal(site?.password, "operator-pw");
 });
 
 // The comment in qBittorrent is matched against base_url as a literal prefix,
@@ -157,62 +168,118 @@ void test("base_url is normalized so comment matching is not thrown off by its s
     JSON.stringify({ sites: [{ id: "spelled", base_url: "https://Tracker.Example.com/" }] }),
   );
 
-  const originalEnv = { ...process.env };
-  t.after(() => {
-    rmSync(tmpDir, { recursive: true, force: true });
-    process.env = originalEnv;
-  });
-  process.env.SPELLED_USERNAME = "operator-user";
-  process.env.SPELLED_PASSWORD = "operator-pw";
+  t.after(() => rmSync(tmpDir, { recursive: true, force: true }));
 
-  assert.equal(loadSites(path).get("spelled")?.baseUrl, "https://tracker.example.com");
+  const env = { SPELLED_USERNAME: "operator-user", SPELLED_PASSWORD: "operator-pw" };
+  assert.equal(loadSites(path, env).get("spelled")?.baseUrl, "https://tracker.example.com");
 });
 
 // SCAN_DELAY_MS paces the scan against the Site. Zero is a legitimate setting
 // (an Operator who accepts the risk), so the validation must accept it while
 // still refusing what would reach `sleep` as NaN or a negative delay.
 void test("SCAN_DELAY_MS accepts zero and refuses what would break the pacing", (t) => {
-  const original = process.env.SCAN_DELAY_MS;
-  t.after(() => {
-    if (original === undefined) delete process.env.SCAN_DELAY_MS;
-    else process.env.SCAN_DELAY_MS = original;
-  });
+  const env = configEnv(t);
 
   for (const value of ["not-a-number", "1.5", "-1"]) {
-    process.env.SCAN_DELAY_MS = value;
-    assert.throws(() => getScanConfig(), /SCAN_DELAY_MS/, `expected "${value}" to be rejected`);
+    assert.throws(
+      () => loadConfig({ ...env, SCAN_DELAY_MS: value }),
+      /SCAN_DELAY_MS/,
+      `expected "${value}" to be rejected`,
+    );
   }
 
-  process.env.SCAN_DELAY_MS = "0";
-  assert.equal(getScanConfig().delayMs, 0);
-  process.env.SCAN_DELAY_MS = "";
-  assert.equal(getScanConfig().delayMs, 1000);
-  delete process.env.SCAN_DELAY_MS;
-  assert.equal(getScanConfig().delayMs, 1000);
+  assert.equal(loadConfig({ ...env, SCAN_DELAY_MS: "0" }).scan.delayMs, 0);
+  assert.equal(loadConfig({ ...env, SCAN_DELAY_MS: "" }).scan.delayMs, 1000);
+  assert.equal(loadConfig(env).scan.delayMs, 1000);
+});
+
+void test("an unusable WEBHOOK_PORT is rejected instead of opening a random one", (t) => {
+  const env = configEnv(t);
+
+  for (const value of ["not-a-number", "8080.5", "0", "-1", "65536"]) {
+    assert.throws(
+      () => loadConfig({ ...env, WEBHOOK_PORT: value }),
+      /WEBHOOK_PORT/,
+      `expected "${value}" to be rejected`,
+    );
+  }
+
+  assert.equal(loadConfig({ ...env, WEBHOOK_PORT: "1" }).webhook.port, 1);
+  assert.equal(loadConfig({ ...env, WEBHOOK_PORT: "65535" }).webhook.port, 65535);
+  assert.equal(loadConfig({ ...env, WEBHOOK_PORT: "" }).webhook.port, 3000);
+  assert.equal(loadConfig(env).webhook.port, 3000);
+});
+
+void test("only the exact word http selects the browserless engine", (t) => {
+  const env = configEnv(t);
+
+  assert.equal(loadConfig({ ...env, THANKS_ENGINE: "http" }).thanksEngine, "http");
+  assert.equal(loadConfig({ ...env, THANKS_ENGINE: "browser" }).thanksEngine, "browser");
+  assert.equal(loadConfig({ ...env, THANKS_ENGINE: "HTTP" }).thanksEngine, "browser");
+  assert.equal(loadConfig({ ...env, THANKS_ENGINE: "" }).thanksEngine, "browser");
+  assert.equal(loadConfig(env).thanksEngine, "browser");
+});
+
+void test("qBittorrent is configured from an API key, from a password, or not at all", (t) => {
+  const env = configEnv(t);
+  const url = "http://qbit.example.com:8080";
+
+  assert.equal(loadConfig(env).qbittorrent, null, "no QBIT_URL means no qBittorrent to talk to");
+
+  assert.deepEqual(loadConfig({ ...env, QBIT_URL: url, QBIT_API_KEY: "the-key" }).qbittorrent, {
+    baseUrl: url,
+    credentials: { mode: "apikey", apiKey: "the-key" },
+  });
+
+  assert.deepEqual(
+    loadConfig({ ...env, QBIT_URL: url, QBIT_USERNAME: "qbit-user", QBIT_PASSWORD: "qbit-pw" })
+      .qbittorrent,
+    { baseUrl: url, credentials: { mode: "cookie", username: "qbit-user", password: "qbit-pw" } },
+  );
+
+  assert.deepEqual(
+    loadConfig({
+      ...env,
+      QBIT_URL: url,
+      QBIT_API_KEY: "the-key",
+      QBIT_USERNAME: "qbit-user",
+      QBIT_PASSWORD: "qbit-pw",
+    }).qbittorrent?.credentials,
+    { mode: "apikey", apiKey: "the-key" },
+    "an API key wins over a password the Operator also left set",
+  );
+
+  assert.throws(
+    () => loadConfig({ ...env, QBIT_URL: url, QBIT_PASSWORD: "qbit-pw" }),
+    /QBIT_USERNAME/,
+  );
+  assert.throws(
+    () => loadConfig({ ...env, QBIT_URL: url, QBIT_USERNAME: "qbit-user" }),
+    /QBIT_PASSWORD/,
+  );
 });
 
 // Both switches are opt-out/opt-in by exact word: anything else keeps the
 // default, so that a typo cannot silently disable the nightly scan.
 void test("the scan switches read one exact word each", (t) => {
-  const originalEnv = { ...process.env };
-  t.after(() => {
-    process.env = originalEnv;
-  });
+  const env = configEnv(t);
 
-  delete process.env.SCAN_ENABLED;
-  delete process.env.SCAN_ON_START;
-  assert.equal(getScanConfig().enabled, true, "the daily scan is on unless turned off");
-  assert.equal(getScanConfig().onStart, false, "a scan on startup is opt-in");
+  assert.equal(loadConfig(env).scan.enabled, true, "the daily scan is on unless turned off");
+  assert.equal(loadConfig(env).scan.onStart, false, "a scan on startup is opt-in");
 
-  process.env.SCAN_ENABLED = "false";
-  assert.equal(getScanConfig().enabled, false);
-  process.env.SCAN_ENABLED = "no";
-  assert.equal(getScanConfig().enabled, true, 'only the word "false" turns the scan off');
+  assert.equal(loadConfig({ ...env, SCAN_ENABLED: "false" }).scan.enabled, false);
+  assert.equal(
+    loadConfig({ ...env, SCAN_ENABLED: "no" }).scan.enabled,
+    true,
+    'only the word "false" turns the scan off',
+  );
 
-  process.env.SCAN_ON_START = "true";
-  assert.equal(getScanConfig().onStart, true);
-  process.env.SCAN_ON_START = "1";
-  assert.equal(getScanConfig().onStart, false, 'only the word "true" scans on startup');
+  assert.equal(loadConfig({ ...env, SCAN_ON_START: "true" }).scan.onStart, true);
+  assert.equal(
+    loadConfig({ ...env, SCAN_ON_START: "1" }).scan.onStart,
+    false,
+    'only the word "true" scans on startup',
+  );
 });
 
 // 32 characters is the documented limit, so it has to load; 33 is refused above.
@@ -222,13 +289,11 @@ void test("an id right at the length limit still loads", (t) => {
   const path = join(tmpDir, "sites.json");
   writeFileSync(path, JSON.stringify({ sites: [{ id, base_url: "https://long.example.com" }] }));
 
-  const originalEnv = { ...process.env };
-  t.after(() => {
-    rmSync(tmpDir, { recursive: true, force: true });
-    process.env = originalEnv;
-  });
-  process.env[`${id.toUpperCase()}_USERNAME`] = "operator-user";
-  process.env[`${id.toUpperCase()}_PASSWORD`] = "operator-pw";
+  t.after(() => rmSync(tmpDir, { recursive: true, force: true }));
 
-  assert.equal(loadSites(path).get(id)?.id, id);
+  const env = {
+    [`${id.toUpperCase()}_USERNAME`]: "operator-user",
+    [`${id.toUpperCase()}_PASSWORD`]: "operator-pw",
+  };
+  assert.equal(loadSites(path, env).get(id)?.id, id);
 });

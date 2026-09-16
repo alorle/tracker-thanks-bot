@@ -7,6 +7,10 @@ import { join } from "node:path";
 import { startFakeQBittorrent, type FakeTorrent } from "./fake-qbittorrent.ts";
 import { startFakeTracker } from "./fake-tracker.ts";
 import { metricValue } from "./metric-probe.ts";
+import { envVarBase, loadConfig } from "../src/config.ts";
+import { createThanks } from "../src/thank.ts";
+import { QBittorrentClient } from "../src/qbittorrent.ts";
+import { startServer } from "../src/webhook-server.ts";
 
 async function startBot(
   t: TestContext,
@@ -23,31 +27,32 @@ async function startBot(
   const sitesPath = join(tmpDir, "sites.json");
   writeFileSync(sitesPath, JSON.stringify({ sites: [{ id: siteId, base_url: baseUrl }] }));
 
-  const { loadSites, envVarBase } = await import("../src/config.ts");
-  const { QBittorrentClient } = await import("../src/qbittorrent.ts");
-  const { startServer } = await import("../src/webhook-server.ts");
-
-  const originalEnv = { ...process.env };
-  process.env.SITES_CONFIG_PATH = sitesPath;
-  process.env.CACHE_DIR = join(tmpDir, "cache");
-  process.env.THANKS_ENGINE = "http";
-  process.env[`${envVarBase(siteId)}_USERNAME`] = "operator-user";
-  process.env[`${envVarBase(siteId)}_PASSWORD`] = "operator-pw";
-  process.env.QBIT_URL = qbit.baseUrl;
-  process.env.QBIT_USERNAME = "qbit-user";
-  process.env.QBIT_PASSWORD = "qbit-pw";
-  delete process.env.QBIT_API_KEY;
-  if (secret === undefined) delete process.env.WEBHOOK_SECRET;
-  else process.env.WEBHOOK_SECRET = secret;
-
-  const server = await startServer(loadSites(), 0, QBittorrentClient.fromEnv());
+  const config = loadConfig({
+    SITES_CONFIG_PATH: sitesPath,
+    CACHE_DIR: join(tmpDir, "cache"),
+    THANKS_ENGINE: "http",
+    [`${envVarBase(siteId)}_USERNAME`]: "operator-user",
+    [`${envVarBase(siteId)}_PASSWORD`]: "operator-pw",
+    QBIT_URL: qbit.baseUrl,
+    QBIT_USERNAME: "qbit-user",
+    QBIT_PASSWORD: "qbit-pw",
+    ...(secret !== undefined && { WEBHOOK_SECRET: secret }),
+  });
+  assert.ok(config.qbittorrent, "expected the fake qBittorrent in the config");
+  const thanks = createThanks(config);
+  const server = await startServer(
+    config.sites,
+    { port: 0, secret: config.webhook.secret },
+    new QBittorrentClient(config.qbittorrent),
+    thanks,
+  );
   const address = server.address();
 
   t.after(async () => {
     await new Promise<void>((resolve) => server.close(() => resolve()));
+    await thanks.closeAll();
     await qbit.close();
     rmSync(tmpDir, { recursive: true, force: true });
-    process.env = originalEnv;
   });
 
   return typeof address === "object" && address ? address.port : 0;

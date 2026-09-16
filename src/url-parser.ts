@@ -1,11 +1,7 @@
-import type { SiteConfig, SitesMap } from "./config.ts";
+import type { SitesMap } from "./config.ts";
+import type { ThankTarget } from "./thank.ts";
 
-export type ParsedTorrentUrl = {
-  site: SiteConfig;
-  torrentId: string;
-};
-
-export function parseTorrentComment(sites: SitesMap, comment: string): ParsedTorrentUrl | null {
+export function parseTorrentComment(sites: SitesMap, comment: string): ThankTarget | null {
   for (const site of sites.values()) {
     const escaped = site.baseUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const pattern = new RegExp(`${escaped}/torrents/(\\d+)`);

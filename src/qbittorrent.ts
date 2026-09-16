@@ -1,6 +1,5 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import { log } from "./log.ts";
-import { getRequiredEnv } from "./config.ts";
 import { qbitApiDuration, qbitApiErrors } from "./metrics.ts";
 
 const PREFIX = "qbittorrent";
@@ -14,10 +13,10 @@ type TorrentInfo = {
   name: string;
 };
 
-type QBittorrentCredentials =
+export type QBittorrentCredentials =
   { mode: "apikey"; apiKey: string } | { mode: "cookie"; username: string; password: string };
 
-type QBittorrentConfig = {
+export type QBittorrentConfig = {
   baseUrl: string;
   credentials: QBittorrentCredentials;
 };
@@ -28,28 +27,6 @@ export class QBittorrentClient {
 
   constructor(config: QBittorrentConfig) {
     this.config = config;
-  }
-
-  static fromEnv(): QBittorrentClient {
-    const baseUrl = getRequiredEnv("QBIT_URL");
-    const apiKey = process.env.QBIT_API_KEY;
-
-    if (apiKey) {
-      log(PREFIX, "Using API key authentication (v5.2.0+).");
-      return new QBittorrentClient({
-        baseUrl,
-        credentials: { mode: "apikey", apiKey },
-      });
-    }
-
-    return new QBittorrentClient({
-      baseUrl,
-      credentials: {
-        mode: "cookie",
-        username: getRequiredEnv("QBIT_USERNAME"),
-        password: getRequiredEnv("QBIT_PASSWORD"),
-      },
-    });
   }
 
   private authHeaders(): Record<string, string> {

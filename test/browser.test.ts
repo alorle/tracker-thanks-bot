@@ -3,12 +3,12 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createBrowserContexts, enqueue } from "../src/browser.ts";
 
 // A thank that throws (a failed login, a network blip) must not take the Site's
 // queue with it: everything grabbed afterwards would then wait on a promise
 // that never settles, and the bot would go quiet without a single error.
 void test("a failed task does not stall the queue for that Site", async () => {
-  const { enqueue } = await import("../src/browser.ts");
   const ran: string[] = [];
 
   await assert.rejects(
@@ -33,16 +33,12 @@ void test("a failed task does not stall the queue for that Site", async () => {
 // context may be handed out twice once it is gone.
 void test("every thank gets a fresh page and a closed context is never reused", async (t) => {
   const tmpDir = mkdtempSync(join(tmpdir(), "thanks-bot-browser-"));
-  const originalCacheDir = process.env.CACHE_DIR;
-  process.env.CACHE_DIR = join(tmpDir, "cache");
 
-  const { freshPage, getContext, closeAll } = await import("../src/browser.ts");
+  const { freshPage, getContext, closeAll } = createBrowserContexts(join(tmpDir, "cache"));
 
   t.after(async () => {
     await closeAll();
     rmSync(tmpDir, { recursive: true, force: true });
-    if (originalCacheDir === undefined) delete process.env.CACHE_DIR;
-    else process.env.CACHE_DIR = originalCacheDir;
   });
 
   const first = await freshPage("pages-site");

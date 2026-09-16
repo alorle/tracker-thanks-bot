@@ -6,6 +6,10 @@ import { join } from "node:path";
 import { startFakeTracker } from "./fake-tracker.ts";
 import { startFakeQBittorrent } from "./fake-qbittorrent.ts";
 import { metricValue } from "./metric-probe.ts";
+import { loadConfig } from "../src/config.ts";
+import { createThanks } from "../src/thank.ts";
+import { QBittorrentClient } from "../src/qbittorrent.ts";
+import { scanAllTorrents } from "../src/scanner.ts";
 
 // A scan walks every torrent in one go. Over HTTP there is no renderer to slow
 // it down, so without pacing the Site takes the whole batch at network speed.
@@ -27,32 +31,33 @@ void test("the scan paces its calls to the Site", async (t) => {
   const sitesPath = join(tmpDir, "sites.json");
   writeFileSync(sitesPath, JSON.stringify({ sites: [{ id: "paced", base_url: tracker.baseUrl }] }));
 
-  const originalEnv = { ...process.env };
-  process.env.SITES_CONFIG_PATH = sitesPath;
-  process.env.CACHE_DIR = join(tmpDir, "cache");
-  process.env.THANKS_ENGINE = "http";
-  process.env.PACED_USERNAME = "operator-user";
-  process.env.PACED_PASSWORD = "operator-pw";
-  process.env.QBIT_URL = qbit.baseUrl;
-  process.env.QBIT_USERNAME = "qbit-user";
-  process.env.QBIT_PASSWORD = "qbit-pw";
-  delete process.env.QBIT_API_KEY;
-  process.env.SCAN_DELAY_MS = "300";
-
-  const { loadSites } = await import("../src/config.ts");
-  const { QBittorrentClient } = await import("../src/qbittorrent.ts");
-  const { scanAllTorrents } = await import("../src/scanner.ts");
+  const config = loadConfig({
+    SITES_CONFIG_PATH: sitesPath,
+    CACHE_DIR: join(tmpDir, "cache"),
+    THANKS_ENGINE: "http",
+    PACED_USERNAME: "operator-user",
+    PACED_PASSWORD: "operator-pw",
+    QBIT_URL: qbit.baseUrl,
+    QBIT_USERNAME: "qbit-user",
+    QBIT_PASSWORD: "qbit-pw",
+    SCAN_DELAY_MS: "300",
+  });
 
   t.after(async () => {
     await tracker.close();
     await qbit.close();
     rmSync(tmpDir, { recursive: true, force: true });
-    process.env = originalEnv;
   });
 
   const scansBefore = await metricValue("tracker_scans_completed_total", { status: "success" });
   const startedAt = Date.now();
-  await scanAllTorrents(loadSites(), QBittorrentClient.fromEnv());
+  assert.ok(config.qbittorrent, "expected the fake qBittorrent in the config");
+  await scanAllTorrents(
+    config.sites,
+    new QBittorrentClient(config.qbittorrent),
+    createThanks(config),
+    config.scan.delayMs,
+  );
 
   assert.equal(tracker.clicks.length, 2, "both matching torrents must be thanked");
   const [first, second] = tracker.clicks;
