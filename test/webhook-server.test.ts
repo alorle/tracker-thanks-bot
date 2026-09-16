@@ -26,6 +26,7 @@ async function startBot(
   const { loadConfig, envVarBase } = await import("../src/config.ts");
   const { QBittorrentClient } = await import("../src/qbittorrent.ts");
   const { startServer } = await import("../src/webhook-server.ts");
+  const { createThanks } = await import("../src/thank.ts");
 
   const originalEnv = { ...process.env };
   process.env.SITES_CONFIG_PATH = sitesPath;
@@ -42,15 +43,18 @@ async function startBot(
 
   const config = loadConfig();
   assert.ok(config.qbittorrent, "expected the fake qBittorrent in the config");
+  const thanks = createThanks(config);
   const server = await startServer(
     config.sites,
     { port: 0, secret: config.webhook.secret },
     new QBittorrentClient(config.qbittorrent),
+    thanks,
   );
   const address = server.address();
 
   t.after(async () => {
     await new Promise<void>((resolve) => server.close(() => resolve()));
+    await thanks.closeAll();
     await qbit.close();
     rmSync(tmpDir, { recursive: true, force: true });
     process.env = originalEnv;

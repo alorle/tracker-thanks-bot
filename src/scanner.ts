@@ -1,7 +1,7 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import { log } from "./log.ts";
 import type { SitesMap } from "./config.ts";
-import { thank } from "./thank.ts";
+import type { Thanks } from "./thank.ts";
 import { parseTorrentComment } from "./url-parser.ts";
 import type { QBittorrentClient } from "./qbittorrent.ts";
 import { scansCompleted, scanDuration, scanTorrentsProcessed } from "./metrics.ts";
@@ -11,6 +11,7 @@ const PREFIX = "scanner";
 export async function scanAllTorrents(
   sites: SitesMap,
   qbClient: QBittorrentClient,
+  thanks: Thanks,
   delayMs: number,
 ): Promise<void> {
   log(PREFIX, "Starting torrent scan...");
@@ -52,7 +53,7 @@ export async function scanAllTorrents(
       if (siteTouched) await sleep(delayMs);
       siteTouched = true;
 
-      await thank(target);
+      await thanks.thank(target);
       thankedCount++;
     } catch (err) {
       log(PREFIX, `Error processing torrent "${torrent.name}": ${String(err)}`);

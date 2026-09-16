@@ -15,8 +15,12 @@ export type SitesMap = Map<string, Site>;
 
 type SiteSettings = Omit<Site, "username" | "password">;
 
+export type ThanksEngine = "browser" | "http";
+
 export type Config = {
   sitesPath: string;
+  cacheDir: string;
+  thanksEngine: ThanksEngine;
   sites: SitesMap;
   qbittorrent: QBittorrentConfig | null;
   webhook: { port: number; secret: string | null };
@@ -164,8 +168,20 @@ function requiredEnv(env: NodeJS.ProcessEnv, name: string): string {
   return value;
 }
 
-export function getCacheDir(): string {
-  return process.env.CACHE_DIR ?? join(import.meta.dirname, "..", ".cache");
+function cacheDir(env: NodeJS.ProcessEnv): string {
+  return env.CACHE_DIR ?? join(import.meta.dirname, "..", ".cache");
+}
+
+/**
+ * Which engine performs the Thanks.
+ *
+ * "browser" drives Playwright (the original path); "http" talks to the Engine's
+ * Livewire endpoint directly, which needs no renderer and so cannot be
+ * OOM-killed. The flag exists so the two can be swapped without a redeploy of
+ * a different image.
+ */
+function thanksEngine(env: NodeJS.ProcessEnv): ThanksEngine {
+  return env.THANKS_ENGINE === "http" ? "http" : "browser";
 }
 
 function qbittorrentConfig(env: NodeJS.ProcessEnv): QBittorrentConfig | null {
@@ -213,6 +229,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const sitesPath = sitesConfigPath(env);
   return {
     sitesPath,
+    cacheDir: cacheDir(env),
+    thanksEngine: thanksEngine(env),
     sites: loadSites(sitesPath, env),
     qbittorrent: qbittorrentConfig(env),
     webhook: {

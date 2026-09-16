@@ -3,8 +3,7 @@ import { timingSafeEqual } from "node:crypto";
 import { log } from "./log.ts";
 import type { Config, SitesMap } from "./config.ts";
 import type { QBittorrentClient } from "./qbittorrent.ts";
-import { drainAll, closeAll } from "./browser.ts";
-import { thank } from "./thank.ts";
+import type { Thanks } from "./thank.ts";
 import { parseTorrentComment } from "./url-parser.ts";
 import { registry, webhooksReceived, webhookProcessingDuration } from "./metrics.ts";
 
@@ -71,6 +70,7 @@ async function handleWebhook(
   source: string,
   qbClient: QBittorrentClient,
   sites: SitesMap,
+  thanks: Thanks,
 ): Promise<void> {
   let body: string;
   try {
@@ -112,7 +112,7 @@ async function handleWebhook(
   jsonResponse(res, 200, { status: "accepted", hash });
 
   // Process in the background
-  processGrab(source, hash, title, qbClient, sites).catch((err) => {
+  processGrab(source, hash, title, qbClient, sites, thanks).catch((err) => {
     log(PREFIX, `[${source}] Error processing grab for "${title}": ${err}`);
   });
 }
@@ -123,6 +123,7 @@ async function processGrab(
   title: string,
   qbClient: QBittorrentClient,
   sites: SitesMap,
+  thanks: Thanks,
 ): Promise<void> {
   const stopTimer = webhookProcessingDuration.startTimer({ source });
 
@@ -139,13 +140,13 @@ async function processGrab(
   const { site, torrentId } = target;
   log(PREFIX, `[${source}] Matched ${site.id} torrent ${torrentId} for "${title}".`);
 
-  await thank(target);
+  await thanks.thank(target);
 
   stopTimer({ site: site.id });
   log(PREFIX, `[${source}] Done processing "${title}".`);
 }
 
-async function gracefulShutdown(signal: string, server: Server): Promise<void> {
+async function gracefulShutdown(signal: string, server: Server, thanks: Thanks): Promise<void> {
   log(PREFIX, `${signal} received, draining (timeout ${SHUTDOWN_TIMEOUT_MS / 1000}s)...`);
 
   const forceExit = setTimeout(() => {
@@ -157,9 +158,9 @@ async function gracefulShutdown(signal: string, server: Server): Promise<void> {
   try {
     await new Promise<void>((resolve) => server.close(() => resolve()));
     log(PREFIX, "HTTP server closed. Draining in-flight thank tasks...");
-    await drainAll();
+    await thanks.drainAll();
     log(PREFIX, "Tasks drained. Closing browser contexts...");
-    await closeAll();
+    await thanks.closeAll();
     log(PREFIX, "Shutdown complete.");
     process.exit(0);
   } catch (err) {
@@ -172,6 +173,7 @@ export async function startServer(
   sites: SitesMap,
   webhook: Config["webhook"],
   qbClient: QBittorrentClient,
+  thanks: Thanks,
 ): Promise<Server> {
   const { port, secret: webhookSecret } = webhook;
   if (!webhookSecret) {
@@ -209,7 +211,7 @@ export async function startServer(
         return;
       }
       const source = req.url === "/webhook/radarr" ? "radarr" : "sonarr";
-      handleWebhook(req, res, source, qbClient, sites).catch((err) => {
+      handleWebhook(req, res, source, qbClient, sites, thanks).catch((err) => {
         log(PREFIX, `Unhandled error in ${source} handler: ${err}`);
         if (!res.headersSent) jsonResponse(res, 500, { error: "Internal server error." });
       });
@@ -224,7 +226,7 @@ export async function startServer(
       process.exit(1);
     }
     shuttingDown = true;
-    void gracefulShutdown(signal, server);
+    void gracefulShutdown(signal, server, thanks);
   };
   process.on("SIGINT", () => onSignal("SIGINT"));
   process.on("SIGTERM", () => onSignal("SIGTERM"));

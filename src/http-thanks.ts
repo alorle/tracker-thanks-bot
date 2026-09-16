@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { envVarBase, getCacheDir, type Site } from "./config.ts";
+import { envVarBase, type Site } from "./config.ts";
 import { log } from "./log.ts";
 import {
   torrentsThanked,
@@ -41,34 +41,6 @@ type Dispatch = {
   data?: { message?: string }; // Livewire 2
 };
 type Effects = { dispatches?: Dispatch[] };
-
-const jars = new Map<string, Jar>();
-
-function jarPath(siteKey: string): string {
-  return join(getCacheDir(), "http-sessions", `${siteKey}.json`);
-}
-
-function loadJar(siteKey: string): Jar {
-  const cached = jars.get(siteKey);
-  if (cached) return cached;
-
-  let jar: Jar = new Map();
-  try {
-    const stored = JSON.parse(readFileSync(jarPath(siteKey), "utf-8")) as Record<string, string>;
-    jar = new Map(Object.entries(stored));
-  } catch {
-    // No persisted session yet (or an unreadable one): start clean and log in.
-  }
-  jars.set(siteKey, jar);
-  return jar;
-}
-
-/** Session cookies are credentials: keep them owner-readable only. */
-function saveJar(siteKey: string, jar: Jar): void {
-  const path = jarPath(siteKey);
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, JSON.stringify(Object.fromEntries(jar)), { mode: 0o600 });
-}
 
 function storeCookies(jar: Jar, response: Response): void {
   for (const line of response.headers.getSetCookie()) {
@@ -293,61 +265,89 @@ async function callStore(
   return null;
 }
 
-export async function thankTorrentHttp(
-  torrentId: string,
-  site: Site,
-  logPrefix: string,
-): Promise<void> {
-  const stopTimer = thankDuration.startTimer({ site: site.id });
-  const jar = loadJar(site.id);
+export type HttpThanks = (torrentId: string, site: Site, logPrefix: string) => Promise<void>;
 
-  try {
-    const url = `${site.baseUrl}/torrents/${torrentId}`;
-    log(logPrefix, `Fetching torrent ${torrentId}...`);
+export function createHttpThanks(cacheDir: string): HttpThanks {
+  const jars = new Map<string, Jar>();
 
-    let page = await request(jar, url);
-    if (page.url.includes("/login")) {
-      await login(jar, site, logPrefix);
-      page = await request(jar, url);
-      if (page.url.includes("/login")) {
-        throw new Error("Logged in but the torrent page still redirects to /login.");
-      }
-    }
-
-    const button = findThankButton(page.body);
-    if (!button) {
-      log(logPrefix, `No thanks button found for torrent ${torrentId}. Skipping.`);
-      torrentsSkipped.inc({ site: site.id, reason: "no_button" });
-      return;
-    }
-
-    // Only Livewire 2 renders the button disabled once thanked; on Livewire 3
-    // the Site rejects the duplicate call instead, handled below.
-    if (button.disabled) {
-      log(logPrefix, `Torrent ${torrentId} already thanked. Skipping.`);
-      torrentsSkipped.inc({ site: site.id, reason: "already_thanked" });
-      return;
-    }
-
-    const csrfToken = /<meta name="csrf-token" content="([^"]*)"/.exec(page.body)?.[1];
-    if (!csrfToken) {
-      throw new Error("No csrf-token meta tag on the torrent page.");
-    }
-
-    const rejection = await callStore(jar, site, button, torrentId, csrfToken, url);
-    if (rejection) {
-      log(logPrefix, `Site rejected thanks for torrent ${torrentId}: ${rejection}`);
-      torrentsSkipped.inc({ site: site.id, reason: "rejected" });
-      return;
-    }
-
-    torrentsThanked.inc({ site: site.id });
-    log(logPrefix, `Thanked torrent ${torrentId}. (livewire v${button.livewire})`);
-  } catch (err) {
-    torrentsErrored.inc({ site: site.id });
-    throw err;
-  } finally {
-    stopTimer();
-    saveJar(site.id, jar);
+  function jarPath(siteKey: string): string {
+    return join(cacheDir, "http-sessions", `${siteKey}.json`);
   }
+
+  function loadJar(siteKey: string): Jar {
+    const cached = jars.get(siteKey);
+    if (cached) return cached;
+
+    let jar: Jar = new Map();
+    try {
+      const stored = JSON.parse(readFileSync(jarPath(siteKey), "utf-8")) as Record<string, string>;
+      jar = new Map(Object.entries(stored));
+    } catch {
+      // No persisted session yet (or an unreadable one): start clean and log in.
+    }
+    jars.set(siteKey, jar);
+    return jar;
+  }
+
+  /** Session cookies are credentials: keep them owner-readable only. */
+  function saveJar(siteKey: string, jar: Jar): void {
+    const path = jarPath(siteKey);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, JSON.stringify(Object.fromEntries(jar)), { mode: 0o600 });
+  }
+
+  return async function thankTorrentHttp(torrentId, site, logPrefix) {
+    const stopTimer = thankDuration.startTimer({ site: site.id });
+    const jar = loadJar(site.id);
+
+    try {
+      const url = `${site.baseUrl}/torrents/${torrentId}`;
+      log(logPrefix, `Fetching torrent ${torrentId}...`);
+
+      let page = await request(jar, url);
+      if (page.url.includes("/login")) {
+        await login(jar, site, logPrefix);
+        page = await request(jar, url);
+        if (page.url.includes("/login")) {
+          throw new Error("Logged in but the torrent page still redirects to /login.");
+        }
+      }
+
+      const button = findThankButton(page.body);
+      if (!button) {
+        log(logPrefix, `No thanks button found for torrent ${torrentId}. Skipping.`);
+        torrentsSkipped.inc({ site: site.id, reason: "no_button" });
+        return;
+      }
+
+      // Only Livewire 2 renders the button disabled once thanked; on Livewire 3
+      // the Site rejects the duplicate call instead, handled below.
+      if (button.disabled) {
+        log(logPrefix, `Torrent ${torrentId} already thanked. Skipping.`);
+        torrentsSkipped.inc({ site: site.id, reason: "already_thanked" });
+        return;
+      }
+
+      const csrfToken = /<meta name="csrf-token" content="([^"]*)"/.exec(page.body)?.[1];
+      if (!csrfToken) {
+        throw new Error("No csrf-token meta tag on the torrent page.");
+      }
+
+      const rejection = await callStore(jar, site, button, torrentId, csrfToken, url);
+      if (rejection) {
+        log(logPrefix, `Site rejected thanks for torrent ${torrentId}: ${rejection}`);
+        torrentsSkipped.inc({ site: site.id, reason: "rejected" });
+        return;
+      }
+
+      torrentsThanked.inc({ site: site.id });
+      log(logPrefix, `Thanked torrent ${torrentId}. (livewire v${button.livewire})`);
+    } catch (err) {
+      torrentsErrored.inc({ site: site.id });
+      throw err;
+    } finally {
+      stopTimer();
+      saveJar(site.id, jar);
+    }
+  };
 }

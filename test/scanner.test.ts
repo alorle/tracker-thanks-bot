@@ -40,6 +40,7 @@ void test("the scan paces its calls to the Site", async (t) => {
   process.env.SCAN_DELAY_MS = "300";
 
   const { loadConfig } = await import("../src/config.ts");
+  const { createThanks } = await import("../src/thank.ts");
   const { QBittorrentClient } = await import("../src/qbittorrent.ts");
   const { scanAllTorrents } = await import("../src/scanner.ts");
 
@@ -57,6 +58,7 @@ void test("the scan paces its calls to the Site", async (t) => {
   await scanAllTorrents(
     config.sites,
     new QBittorrentClient(config.qbittorrent),
+    createThanks(config),
     config.scan.delayMs,
   );
 

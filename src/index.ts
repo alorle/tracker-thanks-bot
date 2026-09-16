@@ -1,7 +1,6 @@
-import { loadConfig, getCacheDir, envVarBase, type Config, type SitesMap } from "./config.ts";
+import { loadConfig, envVarBase, type Config, type SitesMap } from "./config.ts";
 import { log } from "./log.ts";
-import { closeAll } from "./browser.ts";
-import { thank, getThanksEngine } from "./thank.ts";
+import { createThanks, type Thanks } from "./thank.ts";
 import { startServer } from "./webhook-server.ts";
 import { QBittorrentClient } from "./qbittorrent.ts";
 import { scanAllTorrents } from "./scanner.ts";
@@ -33,8 +32,8 @@ function logConfig(config: Config): void {
     ["QBIT_PASSWORD", mask(credentials?.mode === "cookie" ? credentials.password : undefined)],
     ["SITES_CONFIG_PATH", config.sitesPath],
     ...siteVars,
-    ["CACHE_DIR", getCacheDir()],
-    ["THANKS_ENGINE", getThanksEngine()],
+    ["CACHE_DIR", config.cacheDir],
+    ["THANKS_ENGINE", config.thanksEngine],
     ["SCAN_ENABLED", String(config.scan.enabled)],
     ["SCAN_HOUR", String(config.scan.hour)],
     ["SCAN_ON_START", String(config.scan.onStart)],
@@ -47,7 +46,12 @@ function logConfig(config: Config): void {
   }
 }
 
-async function runCli(sites: SitesMap, siteKey: string, torrentIds: string[]): Promise<void> {
+async function runCli(
+  sites: SitesMap,
+  thanks: Thanks,
+  siteKey: string,
+  torrentIds: string[],
+): Promise<void> {
   const site = sites.get(siteKey);
   if (!site) {
     log("auto-thanks", `Unknown site "${siteKey}". Available: ${[...sites.keys()].join(", ")}`);
@@ -61,7 +65,7 @@ async function runCli(sites: SitesMap, siteKey: string, torrentIds: string[]): P
   try {
     for (const torrentId of torrentIds) {
       try {
-        await thank({ site, torrentId });
+        await thanks.thank({ site, torrentId });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         if (message.includes("Login failed")) throw error;
@@ -69,7 +73,7 @@ async function runCli(sites: SitesMap, siteKey: string, torrentIds: string[]): P
       }
     }
   } finally {
-    await closeAll();
+    await thanks.closeAll();
   }
 
   log(logPrefix, "Done.");
@@ -86,16 +90,17 @@ async function main(): Promise<void> {
   const config = loadConfig();
   logConfig(config);
   const { sites, scan } = config;
+  const thanks = createThanks(config);
   const [command, ...rest] = process.argv.slice(2);
 
   if (command === "serve") {
     const qbClient = qbittorrentClient(config);
-    await startServer(sites, config.webhook, qbClient);
+    await startServer(sites, config.webhook, qbClient, thanks);
 
     if (scan.enabled) {
-      scheduleDaily(scan.hour, () => scanAllTorrents(sites, qbClient, scan.delayMs));
+      scheduleDaily(scan.hour, () => scanAllTorrents(sites, qbClient, thanks, scan.delayMs));
       if (scan.onStart) {
-        scanAllTorrents(sites, qbClient, scan.delayMs).catch((err) =>
+        scanAllTorrents(sites, qbClient, thanks, scan.delayMs).catch((err) =>
           log("scanner", `Initial scan failed: ${err}`),
         );
       }
@@ -106,15 +111,15 @@ async function main(): Promise<void> {
   if (command === "scan") {
     const qbClient = qbittorrentClient(config);
     try {
-      await scanAllTorrents(sites, qbClient, scan.delayMs);
+      await scanAllTorrents(sites, qbClient, thanks, scan.delayMs);
     } finally {
-      await closeAll();
+      await thanks.closeAll();
     }
     return;
   }
 
   if (command && sites.has(command) && rest.length > 0) {
-    await runCli(sites, command, rest);
+    await runCli(sites, thanks, command, rest);
     return;
   }
 
