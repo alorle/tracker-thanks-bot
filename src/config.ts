@@ -204,6 +204,16 @@ function qbittorrentConfig(env: NodeJS.ProcessEnv): QBittorrentConfig | null {
   };
 }
 
+function webhookConfig(env: NodeJS.ProcessEnv): Config["webhook"] {
+  const rawPort = env.WEBHOOK_PORT || "3000";
+  const port = Number(rawPort);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    fail(`WEBHOOK_PORT must be an integer between 1 and 65535, got "${rawPort}".`);
+  }
+
+  return { port, secret: env.WEBHOOK_SECRET ?? null };
+}
+
 function scanConfig(env: NodeJS.ProcessEnv): Config["scan"] {
   const rawHour = env.SCAN_HOUR || "3";
   const hour = Number(rawHour);
@@ -233,10 +243,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     thanksEngine: thanksEngine(env),
     sites: loadSites(sitesPath, env),
     qbittorrent: qbittorrentConfig(env),
-    webhook: {
-      port: Number(env.WEBHOOK_PORT ?? "3000"),
-      secret: env.WEBHOOK_SECRET ?? null,
-    },
+    webhook: webhookConfig(env),
     scan: scanConfig(env),
   };
 }

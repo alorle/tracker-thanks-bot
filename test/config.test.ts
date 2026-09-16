@@ -188,6 +188,23 @@ void test("SCAN_DELAY_MS accepts zero and refuses what would break the pacing", 
   assert.equal(loadConfig(env).scan.delayMs, 1000);
 });
 
+void test("an unusable WEBHOOK_PORT is rejected instead of opening a random one", (t) => {
+  const env = configEnv(t);
+
+  for (const value of ["not-a-number", "8080.5", "0", "-1", "65536"]) {
+    assert.throws(
+      () => loadConfig({ ...env, WEBHOOK_PORT: value }),
+      /WEBHOOK_PORT/,
+      `expected "${value}" to be rejected`,
+    );
+  }
+
+  assert.equal(loadConfig({ ...env, WEBHOOK_PORT: "1" }).webhook.port, 1);
+  assert.equal(loadConfig({ ...env, WEBHOOK_PORT: "65535" }).webhook.port, 65535);
+  assert.equal(loadConfig({ ...env, WEBHOOK_PORT: "" }).webhook.port, 3000);
+  assert.equal(loadConfig(env).webhook.port, 3000);
+});
+
 // Both switches are opt-out/opt-in by exact word: anything else keeps the
 // default, so that a typo cannot silently disable the nightly scan.
 void test("the scan switches read one exact word each", (t) => {
