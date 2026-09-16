@@ -12,7 +12,7 @@ import { loadConfig } from "../src/config.ts";
 import { parseTorrentComment } from "../src/url-parser.ts";
 import { QBittorrentClient } from "../src/qbittorrent.ts";
 import { createBrowserContexts, enqueue } from "../src/browser.ts";
-import { createThanks } from "../src/thank.ts";
+import { createThanks, LoginFailedError } from "../src/thank.ts";
 
 // Assert what a step added to the Site's click log rather than the running
 // total: a total makes every later step fail once an earlier one does, and
@@ -402,7 +402,10 @@ for (const engine of ["http", "browser"] as const) {
 
     await assert.rejects(
       () => thanks.thank({ site, torrentId: "9876" }),
-      /Login failed/,
+      (err: unknown) =>
+        err instanceof LoginFailedError &&
+        err.site.id === site.id &&
+        err.message.includes(`${site.id.toUpperCase().replaceAll("-", "_")}_USERNAME`),
       "the Operator has to be told which credentials to check",
     );
 

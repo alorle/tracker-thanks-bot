@@ -1,4 +1,4 @@
-import type { Config, Site } from "./config.ts";
+import { envVarBase, type Config, type Site } from "./config.ts";
 import { createBrowserContexts, enqueue, drainAll, type BrowserContexts } from "./browser.ts";
 import { createBrowserThanks } from "./browser-thanks.ts";
 import { createHttpThanks } from "./http-thanks.ts";
@@ -9,6 +9,17 @@ export type ThankTarget = {
   site: Site;
   torrentId: string;
 };
+
+export class LoginFailedError extends Error {
+  readonly site: Site;
+
+  constructor(site: Site) {
+    const base = envVarBase(site.id);
+    super(`Login failed. Check your ${base}_USERNAME and ${base}_PASSWORD.`);
+    this.name = "LoginFailedError";
+    this.site = site;
+  }
+}
 
 export type SkipReason = "no_button" | "already_thanked" | "rejected";
 

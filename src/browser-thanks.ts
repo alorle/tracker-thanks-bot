@@ -1,8 +1,8 @@
 import type { Page } from "playwright";
-import { envVarBase, type Site } from "./config.ts";
+import type { Site } from "./config.ts";
 import { log } from "./log.ts";
 import type { BrowserContexts } from "./browser.ts";
-import type { ThanksAdapter } from "./thank.ts";
+import { LoginFailedError, type ThanksAdapter } from "./thank.ts";
 import { logins } from "./metrics.ts";
 
 async function login(page: Page, site: Site, logPrefix: string): Promise<void> {
@@ -15,8 +15,7 @@ async function login(page: Page, site: Site, logPrefix: string): Promise<void> {
 
   if (page.url().includes("/login")) {
     logins.inc({ site: site.id, status: "failure" });
-    const base = envVarBase(site.id);
-    throw new Error(`Login failed. Check your ${base}_USERNAME and ${base}_PASSWORD.`);
+    throw new LoginFailedError(site);
   }
 
   logins.inc({ site: site.id, status: "success" });

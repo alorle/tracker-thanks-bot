@@ -1,6 +1,6 @@
 import { loadConfig, envVarBase, type Config, type SitesMap } from "./config.ts";
 import { log } from "./log.ts";
-import { createThanks, type Thanks } from "./thank.ts";
+import { createThanks, LoginFailedError, type Thanks } from "./thank.ts";
 import { startServer } from "./webhook-server.ts";
 import { QBittorrentClient } from "./qbittorrent.ts";
 import { scanAllTorrents } from "./scanner.ts";
@@ -67,8 +67,8 @@ async function runCli(
       try {
         await thanks.thank({ site, torrentId });
       } catch (error) {
+        if (error instanceof LoginFailedError) throw error;
         const message = error instanceof Error ? error.message : String(error);
-        if (message.includes("Login failed")) throw error;
         log(logPrefix, `Error processing torrent ${torrentId}: ${message}`);
       }
     }

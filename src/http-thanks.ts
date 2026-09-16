@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { envVarBase, type Site } from "./config.ts";
-import type { ThanksAdapter } from "./thank.ts";
+import type { Site } from "./config.ts";
+import { LoginFailedError, type ThanksAdapter } from "./thank.ts";
 import { log } from "./log.ts";
 import { logins } from "./metrics.ts";
 
@@ -179,8 +179,7 @@ async function login(jar: Jar, site: Site, logPrefix: string): Promise<void> {
 
   if (submitted.url.includes("/login")) {
     logins.inc({ site: site.id, status: "failure" });
-    const base = envVarBase(site.id);
-    throw new Error(`Login failed. Check your ${base}_USERNAME and ${base}_PASSWORD.`);
+    throw new LoginFailedError(site);
   }
 
   logins.inc({ site: site.id, status: "success" });
