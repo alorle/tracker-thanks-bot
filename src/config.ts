@@ -1,13 +1,17 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-export type SiteConfig = {
+export type Site = {
   id: string;
   baseUrl: string;
   loginButtonSelector: string;
+  username: string;
+  password: string;
 };
 
-export type SitesMap = Map<string, SiteConfig>;
+export type SitesMap = Map<string, Site>;
+
+type SiteSettings = Omit<Site, "username" | "password">;
 
 const ID_REGEX = /^[a-z][a-z0-9-]{0,31}$/;
 const RESERVED_IDS = new Set([
@@ -58,7 +62,10 @@ export function getSitesConfigPath(): string {
   return join(import.meta.dirname, "..", "config", "sites.json");
 }
 
-export function loadSites(path: string = getSitesConfigPath()): SitesMap {
+export function loadSites(
+  path: string = getSitesConfigPath(),
+  env: NodeJS.ProcessEnv = process.env,
+): SitesMap {
   let raw: string;
   try {
     raw = readFileSync(path, "utf-8");
@@ -83,7 +90,7 @@ export function loadSites(path: string = getSitesConfigPath()): SitesMap {
     fail(`Sites config at "${path}" must contain a non-empty "sites" array.`);
   }
 
-  const map: SitesMap = new Map();
+  const settings = new Map<string, SiteSettings>();
   const seenBaseUrls = new Map<string, string>();
 
   for (const entry of parsed.sites as RawSiteEntry[]) {
@@ -99,7 +106,7 @@ export function loadSites(path: string = getSitesConfigPath()): SitesMap {
     if (RESERVED_IDS.has(id)) {
       fail(`Site id "${id}" is reserved (${[...RESERVED_IDS].join(", ")}).`);
     }
-    if (map.has(id)) {
+    if (settings.has(id)) {
       fail(`Duplicate site id "${id}" in ${path}.`);
     }
 
@@ -122,20 +129,24 @@ export function loadSites(path: string = getSitesConfigPath()): SitesMap {
       fail(`Site "${id}" field "login_button_selector" must be a non-empty string.`);
     }
 
-    map.set(id, { id, baseUrl, loginButtonSelector });
+    settings.set(id, { id, baseUrl, loginButtonSelector });
   }
 
   const missing: string[] = [];
-  for (const site of map.values()) {
-    const base = envVarBase(site.id);
-    if (!process.env[`${base}_USERNAME`]) missing.push(`${base}_USERNAME`);
-    if (!process.env[`${base}_PASSWORD`]) missing.push(`${base}_PASSWORD`);
+  const sites: SitesMap = new Map();
+  for (const [id, site] of settings) {
+    const base = envVarBase(id);
+    const username = env[`${base}_USERNAME`];
+    const password = env[`${base}_PASSWORD`];
+    if (!username) missing.push(`${base}_USERNAME`);
+    if (!password) missing.push(`${base}_PASSWORD`);
+    if (username && password) sites.set(id, { ...site, username, password });
   }
   if (missing.length > 0) {
     fail(`Missing required credential env vars: ${missing.join(", ")}.`);
   }
 
-  return map;
+  return sites;
 }
 
 export function getRequiredEnv(name: string): string {
@@ -144,14 +155,6 @@ export function getRequiredEnv(name: string): string {
     throw new Error(`Required environment variable ${name} is not set.`);
   }
   return value;
-}
-
-export function getSiteCredentials(site: SiteConfig): { username: string; password: string } {
-  const base = envVarBase(site.id);
-  return {
-    username: getRequiredEnv(`${base}_USERNAME`),
-    password: getRequiredEnv(`${base}_PASSWORD`),
-  };
 }
 
 export function getCacheDir(): string {

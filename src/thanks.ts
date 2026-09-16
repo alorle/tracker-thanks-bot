@@ -1,5 +1,5 @@
 import type { Page } from "playwright";
-import { envVarBase, type SiteConfig } from "./config.ts";
+import { envVarBase, type Site } from "./config.ts";
 import { log } from "./log.ts";
 import {
   torrentsThanked,
@@ -9,17 +9,11 @@ import {
   logins,
 } from "./metrics.ts";
 
-async function login(
-  page: Page,
-  username: string,
-  password: string,
-  site: SiteConfig,
-  logPrefix: string,
-): Promise<void> {
+async function login(page: Page, site: Site, logPrefix: string): Promise<void> {
   log(logPrefix, "Login required. Submitting credentials...");
 
-  await page.locator('input[name="username"]').fill(username);
-  await page.locator('input[name="password"]').fill(password);
+  await page.locator('input[name="username"]').fill(site.username);
+  await page.locator('input[name="password"]').fill(site.password);
   await page.locator(site.loginButtonSelector).click();
   await page.waitForLoadState("networkidle");
 
@@ -36,9 +30,7 @@ async function login(
 export async function thankTorrent(
   page: Page,
   torrentId: string,
-  username: string,
-  password: string,
-  site: SiteConfig,
+  site: Site,
   logPrefix: string,
 ): Promise<void> {
   const stopTimer = thankDuration.startTimer({ site: site.id });
@@ -50,7 +42,7 @@ export async function thankTorrent(
     await page.goto(url);
 
     if (page.url().includes("/login")) {
-      await login(page, username, password, site, logPrefix);
+      await login(page, site, logPrefix);
       await page.goto(url);
     }
 

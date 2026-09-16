@@ -4,7 +4,8 @@ import { log } from "./log.ts";
 import type { SitesMap } from "./config.ts";
 import type { QBittorrentClient } from "./qbittorrent.ts";
 import { drainAll, closeAll } from "./browser.ts";
-import { resolveThankTarget, thank } from "./thank.ts";
+import { thank } from "./thank.ts";
+import { parseTorrentComment } from "./url-parser.ts";
 import { registry, webhooksReceived, webhookProcessingDuration } from "./metrics.ts";
 
 const PREFIX = "webhook";
@@ -128,22 +129,17 @@ async function processGrab(
   log(PREFIX, `[${source}] Querying qBittorrent for torrent comment (hash: ${hash})...`);
   const comment = await qbClient.getTorrentCommentWithRetry(hash);
 
-  const resolved = resolveThankTarget(sites, comment);
-  if (!resolved.ok) {
-    log(
-      PREFIX,
-      resolved.reason === "no_match"
-        ? `[${source}] No matching site URL in comment: "${comment}". Skipping.`
-        : `[${source}] Missing credentials for ${resolved.siteId}: ${resolved.message}`,
-    );
-    stopTimer({ site: resolved.siteId ?? "unknown" });
+  const target = parseTorrentComment(sites, comment);
+  if (!target) {
+    log(PREFIX, `[${source}] No matching site URL in comment: "${comment}". Skipping.`);
+    stopTimer({ site: "unknown" });
     return;
   }
 
-  const { site, torrentId } = resolved.target;
+  const { site, torrentId } = target;
   log(PREFIX, `[${source}] Matched ${site.id} torrent ${torrentId} for "${title}".`);
 
-  await thank(resolved.target);
+  await thank(target);
 
   stopTimer({ site: site.id });
   log(PREFIX, `[${source}] Done processing "${title}".`);

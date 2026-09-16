@@ -4,7 +4,7 @@ import { mkdtempSync, writeFileSync, rmSync, existsSync, readFileSync, statSync 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startFakeTracker, type ThanksClick } from "./fake-tracker.ts";
-import type { SiteConfig } from "../src/config.ts";
+import type { Site } from "../src/config.ts";
 import { startFakeQBittorrent } from "./fake-qbittorrent.ts";
 import { metricValue } from "./metric-probe.ts";
 
@@ -76,7 +76,7 @@ void test("operator config drives the full grab → thanks flow", async (t) => {
   process.env.QBIT_PASSWORD = "qbit-pw";
   delete process.env.QBIT_API_KEY;
 
-  const { loadSites, getSiteCredentials } = await import("../src/config.ts");
+  const { loadSites } = await import("../src/config.ts");
   const { parseTorrentComment } = await import("../src/url-parser.ts");
   const { QBittorrentClient } = await import("../src/qbittorrent.ts");
   const { freshPage, enqueue, closeAll } = await import("../src/browser.ts");
@@ -113,22 +113,19 @@ void test("operator config drives the full grab → thanks flow", async (t) => {
   });
 
   await t.test("derives credentials from the Site id", () => {
-    const sites = loadSites();
-    const site = sites.get("fake-site");
+    const site = loadSites().get("fake-site");
     assert.ok(site, "expected configured site");
-    const credentials = getSiteCredentials(site);
-    assert.equal(credentials.username, "operator-user");
-    assert.equal(credentials.password, "operator-pw");
+    assert.equal(site.username, "operator-user");
+    assert.equal(site.password, "operator-pw");
   });
 
   await t.test("logs into the tracker and clicks the thanks button", async () => {
     const sites = loadSites();
     const site = sites.get("fake-site");
     assert.ok(site, "expected configured site");
-    const { username, password } = getSiteCredentials(site);
 
     const clicksBefore = tracker.clicks.length;
-    await thank({ site, torrentId: trackerTorrentId, username, password });
+    await thank({ site, torrentId: trackerTorrentId });
 
     assert.equal(tracker.logins.length, 1, "tracker should have observed one login");
     assert.deepEqual(tracker.logins[0], { username: "operator-user", ok: true });
@@ -145,12 +142,11 @@ void test("operator config drives the full grab → thanks flow", async (t) => {
     const sites = loadSites();
     const site = sites.get("fake-site");
     assert.ok(site, "expected configured site");
-    const { username, password } = getSiteCredentials(site);
 
     // Add a second torrent on the same Site to confirm session reuse.
     const secondTorrentId = "12345";
     const clicksBefore = tracker.clicks.length;
-    await thank({ site, torrentId: secondTorrentId, username, password });
+    await thank({ site, torrentId: secondTorrentId });
 
     assert.equal(tracker.logins.length, 1, "second thank should reuse the cached session");
     assertThanked(
@@ -169,7 +165,6 @@ void test("operator config drives the full grab → thanks flow", async (t) => {
     const sites = loadSites();
     const site = sites.get("fake-site");
     assert.ok(site, "expected configured site");
-    const { username, password } = getSiteCredentials(site);
 
     await enqueue("fake-site", async () => {
       const page = await freshPage("fake-site");
@@ -179,7 +174,7 @@ void test("operator config drives the full grab → thanks flow", async (t) => {
 
     const thirdTorrentId = "24680";
     const clicksBefore = tracker.clicks.length;
-    await thank({ site, torrentId: thirdTorrentId, username, password });
+    await thank({ site, torrentId: thirdTorrentId });
 
     assertThanked(
       tracker.clicks,
@@ -217,7 +212,7 @@ for (const livewire of [2, 3] as const) {
     process.env[`${siteId.toUpperCase().replaceAll("-", "_")}_USERNAME`] = "operator-user";
     process.env[`${siteId.toUpperCase().replaceAll("-", "_")}_PASSWORD`] = "operator-pw";
 
-    const { loadSites, getSiteCredentials } = await import("../src/config.ts");
+    const { loadSites } = await import("../src/config.ts");
     const { thank } = await import("../src/thank.ts");
 
     t.after(async () => {
@@ -229,12 +224,11 @@ for (const livewire of [2, 3] as const) {
     const sites = loadSites();
     const site = sites.get(siteId);
     assert.ok(site, "expected configured site");
-    const { username, password } = getSiteCredentials(site);
 
     await t.test("logs in and thanks without a browser", async () => {
       const clicksBefore = tracker.clicks.length;
       const thankedBefore = await metricValue("tracker_torrents_thanked_total", { site: siteId });
-      await thank({ site, torrentId: "9876", username, password });
+      await thank({ site, torrentId: "9876" });
 
       assert.deepEqual(tracker.logins, [{ username: "operator-user", ok: true }]);
       // The bookmark button is rendered first and carries the same wire:click;
@@ -261,7 +255,7 @@ for (const livewire of [2, 3] as const) {
 
     await t.test("reuses the stored session and does not re-login", async () => {
       const clicksBefore = tracker.clicks.length;
-      await thank({ site, torrentId: "12345", username, password });
+      await thank({ site, torrentId: "12345" });
 
       assert.equal(tracker.logins.length, 1, "second thank should reuse the session cookie");
       assertThanked(
@@ -300,7 +294,7 @@ for (const livewire of [2, 3] as const) {
         reason,
       });
 
-      await thank({ site, torrentId: "9876", username, password });
+      await thank({ site, torrentId: "9876" });
 
       assertThanked(
         tracker.clicks,
@@ -332,7 +326,7 @@ for (const livewire of [2, 3] as const) {
         reason: "rejected",
       });
 
-      await thank({ site, torrentId: "5555", username, password });
+      await thank({ site, torrentId: "5555" });
 
       assertThanked(tracker.clicks, clicksBefore, [], "a refused thanks reached nothing");
       assert.equal(
@@ -361,7 +355,7 @@ async function configureSite(
     engine,
     password = "operator-pw",
   }: { siteId: string; baseUrl: string; engine: "browser" | "http"; password?: string },
-): Promise<{ site: SiteConfig; username: string; password: string }> {
+): Promise<Site> {
   const tmpDir = mkdtempSync(join(tmpdir(), "thanks-bot-e2e-"));
   const sitesPath = join(tmpDir, "sites.json");
   writeFileSync(sitesPath, JSON.stringify({ sites: [{ id: siteId, base_url: baseUrl }] }));
@@ -379,10 +373,10 @@ async function configureSite(
     process.env = originalEnv;
   });
 
-  const { loadSites, getSiteCredentials } = await import("../src/config.ts");
+  const { loadSites } = await import("../src/config.ts");
   const site = loadSites().get(siteId);
   assert.ok(site, "expected the configured site");
-  return { site, ...getSiteCredentials(site) };
+  return site;
 }
 
 // Wrong credentials are how a Site answers after the Operator rotates a
@@ -393,7 +387,7 @@ for (const engine of ["http", "browser"] as const) {
     const tracker = await startFakeTracker({
       validCredentials: { username: "operator-user", password: "operator-pw" },
     });
-    const { site, username, password } = await configureSite(t, {
+    const site = await configureSite(t, {
       siteId: `bad-login-${engine}`,
       baseUrl: tracker.baseUrl,
       engine,
@@ -413,7 +407,7 @@ for (const engine of ["http", "browser"] as const) {
     });
 
     await assert.rejects(
-      () => thank({ site, torrentId: "9876", username, password }),
+      () => thank({ site, torrentId: "9876" }),
       /Login failed/,
       "the Operator has to be told which credentials to check",
     );
@@ -437,7 +431,7 @@ void test("the browser engine skips a torrent the Site shows as already thanked"
     validCredentials: { username: "operator-user", password: "operator-pw" },
     livewire: 2,
   });
-  const { site, username, password } = await configureSite(t, {
+  const site = await configureSite(t, {
     siteId: "browser-duplicate",
     baseUrl: tracker.baseUrl,
     engine: "browser",
@@ -450,7 +444,7 @@ void test("the browser engine skips a torrent the Site shows as already thanked"
     await tracker.close();
   });
 
-  await thank({ site, torrentId: "9876", username, password });
+  await thank({ site, torrentId: "9876" });
   assert.equal(tracker.clicks.length, 1, "the first thanks must reach the Site");
 
   const skippedBefore = await metricValue("tracker_torrents_skipped_total", {
@@ -458,7 +452,7 @@ void test("the browser engine skips a torrent the Site shows as already thanked"
     reason: "already_thanked",
   });
 
-  await thank({ site, torrentId: "9876", username, password });
+  await thank({ site, torrentId: "9876" });
 
   assert.equal(tracker.clicks.length, 1, "a disabled button must not be clicked again");
   assert.equal(

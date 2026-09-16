@@ -143,7 +143,9 @@ void test("a Site whose credential env vars are missing is refused", (t) => {
   assert.throws(() => loadSites(path), /credential env vars: NEEDS_CREDS_PASSWORD/);
 
   process.env.NEEDS_CREDS_PASSWORD = "operator-pw";
-  assert.equal(loadSites(path).size, 1, "both vars set, the Site must load");
+  const site = loadSites(path).get("needs-creds");
+  assert.equal(site?.username, "operator-user", "the loaded Site must carry its credentials");
+  assert.equal(site?.password, "operator-pw");
 });
 
 // The comment in qBittorrent is matched against base_url as a literal prefix,

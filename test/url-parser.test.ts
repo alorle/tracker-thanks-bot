@@ -1,17 +1,19 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { parseTorrentComment } from "../src/url-parser.ts";
-import type { SitesMap } from "../src/config.ts";
+import type { Site, SitesMap } from "../src/config.ts";
+
+const site = (id: string, baseUrl: string): Site => ({
+  id,
+  baseUrl,
+  loginButtonSelector: 'button[type="submit"]',
+  username: "operator-user",
+  password: "operator-pw",
+});
 
 const sites: SitesMap = new Map([
-  [
-    "alpha",
-    { id: "alpha", baseUrl: "https://a.example.com", loginButtonSelector: 'button[type="submit"]' },
-  ],
-  [
-    "beta",
-    { id: "beta", baseUrl: "https://b.example.com", loginButtonSelector: 'button[type="submit"]' },
-  ],
+  ["alpha", site("alpha", "https://a.example.com")],
+  ["beta", site("beta", "https://b.example.com")],
 ]);
 
 void test("the torrent id is taken from the Site the comment names", () => {

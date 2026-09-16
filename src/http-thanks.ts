@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { envVarBase, getCacheDir, type SiteConfig } from "./config.ts";
+import { envVarBase, getCacheDir, type Site } from "./config.ts";
 import { log } from "./log.ts";
 import {
   torrentsThanked,
@@ -185,13 +185,7 @@ export function findThankButton(html: string): ThankButton | null {
   return null;
 }
 
-async function login(
-  jar: Jar,
-  site: SiteConfig,
-  username: string,
-  password: string,
-  logPrefix: string,
-): Promise<void> {
+async function login(jar: Jar, site: Site, logPrefix: string): Promise<void> {
   log(logPrefix, "Login required. Submitting credentials...");
 
   const loginUrl = `${site.baseUrl}/login`;
@@ -207,8 +201,8 @@ async function login(
     if (!name) continue;
     fields.set(name, decodeEntities(/\bvalue="([^"]*)"/.exec(input[0])?.[1] ?? ""));
   }
-  fields.set("username", username);
-  fields.set("password", password);
+  fields.set("username", site.username);
+  fields.set("password", site.password);
 
   const submitted = await request(jar, loginUrl, {
     method: "POST",
@@ -229,7 +223,7 @@ async function login(
 /** Invoke the component's `store()`. Returns the Site's rejection, if any. */
 async function callStore(
   jar: Jar,
-  site: SiteConfig,
+  site: Site,
   button: ThankButton,
   torrentId: string,
   csrfToken: string,
@@ -301,9 +295,7 @@ async function callStore(
 
 export async function thankTorrentHttp(
   torrentId: string,
-  username: string,
-  password: string,
-  site: SiteConfig,
+  site: Site,
   logPrefix: string,
 ): Promise<void> {
   const stopTimer = thankDuration.startTimer({ site: site.id });
@@ -315,7 +307,7 @@ export async function thankTorrentHttp(
 
     let page = await request(jar, url);
     if (page.url.includes("/login")) {
-      await login(jar, site, username, password, logPrefix);
+      await login(jar, site, logPrefix);
       page = await request(jar, url);
       if (page.url.includes("/login")) {
         throw new Error("Logged in but the torrent page still redirects to /login.");

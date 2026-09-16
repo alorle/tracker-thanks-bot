@@ -1,7 +1,8 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import { log } from "./log.ts";
 import { getScanConfig, type SitesMap } from "./config.ts";
-import { resolveThankTarget, thank } from "./thank.ts";
+import { thank } from "./thank.ts";
+import { parseTorrentComment } from "./url-parser.ts";
 import type { QBittorrentClient } from "./qbittorrent.ts";
 import { scansCompleted, scanDuration, scanTorrentsProcessed } from "./metrics.ts";
 
@@ -36,8 +37,8 @@ export async function scanAllTorrents(sites: SitesMap, qbClient: QBittorrentClie
         continue;
       }
 
-      const resolved = resolveThankTarget(sites, comment);
-      if (!resolved.ok) {
+      const target = parseTorrentComment(sites, comment);
+      if (!target) {
         skippedCount++;
         continue;
       }
@@ -48,7 +49,7 @@ export async function scanAllTorrents(sites: SitesMap, qbClient: QBittorrentClie
       if (siteTouched) await sleep(delayMs);
       siteTouched = true;
 
-      await thank(resolved.target);
+      await thank(target);
       thankedCount++;
     } catch (err) {
       log(PREFIX, `Error processing torrent "${torrent.name}": ${String(err)}`);

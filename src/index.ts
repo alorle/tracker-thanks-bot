@@ -1,10 +1,4 @@
-import {
-  loadSites,
-  getSiteCredentials,
-  getScanConfig,
-  envVarBase,
-  type SitesMap,
-} from "./config.ts";
+import { loadSites, getScanConfig, envVarBase, type SitesMap } from "./config.ts";
 import { log } from "./log.ts";
 import { closeAll } from "./browser.ts";
 import { thank, getThanksEngine } from "./thank.ts";
@@ -58,7 +52,6 @@ async function runCli(sites: SitesMap, siteKey: string, torrentIds: string[]): P
     process.exit(1);
   }
 
-  const { username, password } = getSiteCredentials(site);
   const logPrefix = `auto-thanks:${site.id}`;
 
   log(logPrefix, `Processing ${torrentIds.length} torrent(s)...`);
@@ -66,7 +59,7 @@ async function runCli(sites: SitesMap, siteKey: string, torrentIds: string[]): P
   try {
     for (const torrentId of torrentIds) {
       try {
-        await thank({ site, torrentId, username, password });
+        await thank({ site, torrentId });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         if (message.includes("Login failed")) throw error;
