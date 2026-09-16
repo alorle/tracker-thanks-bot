@@ -117,14 +117,11 @@ void test("a sites.json the Operator got wrong is refused at load time", (t) => 
 
   for (const [what, contents, expected] of refused) {
     const path = write(JSON.stringify(contents));
-    assert.throws(() => loadSites(path, process.env), expected, `expected ${what} to be refused`);
+    assert.throws(() => loadSites(path, {}), expected, `expected ${what} to be refused`);
   }
 
-  assert.throws(() => loadSites(write("{ not json"), process.env), /is not valid JSON/);
-  assert.throws(
-    () => loadSites(join(tmpDir, "absent.json"), process.env),
-    /Sites config not found/,
-  );
+  assert.throws(() => loadSites(write("{ not json"), {}), /is not valid JSON/);
+  assert.throws(() => loadSites(join(tmpDir, "absent.json"), {}), /Sites config not found/);
 });
 
 // Credentials are looked up from env vars derived from the id, so a Site whose
@@ -138,21 +135,19 @@ void test("a Site whose credential env vars are missing is refused", (t) => {
     JSON.stringify({ sites: [{ id: "needs-creds", base_url: "https://tracker.example.com" }] }),
   );
 
-  const originalEnv = { ...process.env };
-  t.after(() => {
-    rmSync(tmpDir, { recursive: true, force: true });
-    process.env = originalEnv;
-  });
+  t.after(() => rmSync(tmpDir, { recursive: true, force: true }));
 
-  delete process.env.NEEDS_CREDS_USERNAME;
-  delete process.env.NEEDS_CREDS_PASSWORD;
-  assert.throws(() => loadSites(path, process.env), /NEEDS_CREDS_USERNAME, NEEDS_CREDS_PASSWORD/);
+  assert.throws(() => loadSites(path, {}), /NEEDS_CREDS_USERNAME, NEEDS_CREDS_PASSWORD/);
 
-  process.env.NEEDS_CREDS_USERNAME = "operator-user";
-  assert.throws(() => loadSites(path, process.env), /credential env vars: NEEDS_CREDS_PASSWORD/);
+  assert.throws(
+    () => loadSites(path, { NEEDS_CREDS_USERNAME: "operator-user" }),
+    /credential env vars: NEEDS_CREDS_PASSWORD/,
+  );
 
-  process.env.NEEDS_CREDS_PASSWORD = "operator-pw";
-  const site = loadSites(path, process.env).get("needs-creds");
+  const site = loadSites(path, {
+    NEEDS_CREDS_USERNAME: "operator-user",
+    NEEDS_CREDS_PASSWORD: "operator-pw",
+  }).get("needs-creds");
   assert.equal(site?.username, "operator-user", "the loaded Site must carry its credentials");
   assert.equal(site?.password, "operator-pw");
 });
@@ -168,15 +163,10 @@ void test("base_url is normalized so comment matching is not thrown off by its s
     JSON.stringify({ sites: [{ id: "spelled", base_url: "https://Tracker.Example.com/" }] }),
   );
 
-  const originalEnv = { ...process.env };
-  t.after(() => {
-    rmSync(tmpDir, { recursive: true, force: true });
-    process.env = originalEnv;
-  });
-  process.env.SPELLED_USERNAME = "operator-user";
-  process.env.SPELLED_PASSWORD = "operator-pw";
+  t.after(() => rmSync(tmpDir, { recursive: true, force: true }));
 
-  assert.equal(loadSites(path, process.env).get("spelled")?.baseUrl, "https://tracker.example.com");
+  const env = { SPELLED_USERNAME: "operator-user", SPELLED_PASSWORD: "operator-pw" };
+  assert.equal(loadSites(path, env).get("spelled")?.baseUrl, "https://tracker.example.com");
 });
 
 // SCAN_DELAY_MS paces the scan against the Site. Zero is a legitimate setting
@@ -228,13 +218,11 @@ void test("an id right at the length limit still loads", (t) => {
   const path = join(tmpDir, "sites.json");
   writeFileSync(path, JSON.stringify({ sites: [{ id, base_url: "https://long.example.com" }] }));
 
-  const originalEnv = { ...process.env };
-  t.after(() => {
-    rmSync(tmpDir, { recursive: true, force: true });
-    process.env = originalEnv;
-  });
-  process.env[`${id.toUpperCase()}_USERNAME`] = "operator-user";
-  process.env[`${id.toUpperCase()}_PASSWORD`] = "operator-pw";
+  t.after(() => rmSync(tmpDir, { recursive: true, force: true }));
 
-  assert.equal(loadSites(path, process.env).get(id)?.id, id);
+  const env = {
+    [`${id.toUpperCase()}_USERNAME`]: "operator-user",
+    [`${id.toUpperCase()}_PASSWORD`]: "operator-pw",
+  };
+  assert.equal(loadSites(path, env).get(id)?.id, id);
 });

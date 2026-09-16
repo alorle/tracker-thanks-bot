@@ -8,6 +8,11 @@ import type { Site } from "../src/config.ts";
 import type { Thanks } from "../src/thank.ts";
 import { startFakeQBittorrent } from "./fake-qbittorrent.ts";
 import { metricValue } from "./metric-probe.ts";
+import { loadConfig } from "../src/config.ts";
+import { parseTorrentComment } from "../src/url-parser.ts";
+import { QBittorrentClient } from "../src/qbittorrent.ts";
+import { createBrowserContexts, enqueue } from "../src/browser.ts";
+import { createThanks } from "../src/thank.ts";
 
 // Assert what a step added to the Site's click log rather than the running
 // total: a total makes every later step fail once an earlier one does, and
@@ -64,25 +69,16 @@ void test("operator config drives the full grab → thanks flow", async (t) => {
     }),
   );
 
-  const originalEnv = { ...process.env };
-  process.env.SITES_CONFIG_PATH = sitesPath;
-  process.env.CACHE_DIR = join(tmpDir, "cache");
-  // Without this the Operator's own THANKS_ENGINE (direnv exports .env into
-  // every shell here) silently turns this into a second http-engine test.
-  process.env.THANKS_ENGINE = "browser";
-  process.env.FAKE_SITE_USERNAME = "operator-user";
-  process.env.FAKE_SITE_PASSWORD = "operator-pw";
-  process.env.QBIT_URL = qbit.baseUrl;
-  process.env.QBIT_USERNAME = "qbit-user";
-  process.env.QBIT_PASSWORD = "qbit-pw";
-  delete process.env.QBIT_API_KEY;
-
-  const { loadConfig } = await import("../src/config.ts");
-  const { parseTorrentComment } = await import("../src/url-parser.ts");
-  const { QBittorrentClient } = await import("../src/qbittorrent.ts");
-  const { createBrowserContexts, enqueue } = await import("../src/browser.ts");
-  const { createThanks } = await import("../src/thank.ts");
-  const config = loadConfig();
+  const config = loadConfig({
+    SITES_CONFIG_PATH: sitesPath,
+    CACHE_DIR: join(tmpDir, "cache"),
+    THANKS_ENGINE: "browser",
+    FAKE_SITE_USERNAME: "operator-user",
+    FAKE_SITE_PASSWORD: "operator-pw",
+    QBIT_URL: qbit.baseUrl,
+    QBIT_USERNAME: "qbit-user",
+    QBIT_PASSWORD: "qbit-pw",
+  });
   const contexts = createBrowserContexts(config.cacheDir);
   const thanks = createThanks(config, contexts);
 
@@ -91,11 +87,10 @@ void test("operator config drives the full grab → thanks flow", async (t) => {
     await tracker.close();
     await qbit.close();
     rmSync(tmpDir, { recursive: true, force: true });
-    process.env = originalEnv;
   });
 
   await t.test("loads the operator-supplied Site from sites.json", () => {
-    const sites = loadConfig().sites;
+    const sites = config.sites;
     assert.equal(sites.size, 1);
     const site = sites.get("fake-site");
     assert.ok(site, "expected site keyed by configured id");
@@ -105,7 +100,6 @@ void test("operator config drives the full grab → thanks flow", async (t) => {
   });
 
   await t.test("identifies the Site from a qBittorrent comment", async () => {
-    const config = loadConfig();
     assert.ok(config.qbittorrent, "expected the fake qBittorrent in the config");
     const qbClient = new QBittorrentClient(config.qbittorrent);
     const comment = await qbClient.getTorrentComment(torrentHash);
@@ -118,14 +112,14 @@ void test("operator config drives the full grab → thanks flow", async (t) => {
   });
 
   await t.test("derives credentials from the Site id", () => {
-    const site = loadConfig().sites.get("fake-site");
+    const site = config.sites.get("fake-site");
     assert.ok(site, "expected configured site");
     assert.equal(site.username, "operator-user");
     assert.equal(site.password, "operator-pw");
   });
 
   await t.test("logs into the tracker and clicks the thanks button", async () => {
-    const sites = loadConfig().sites;
+    const sites = config.sites;
     const site = sites.get("fake-site");
     assert.ok(site, "expected configured site");
 
@@ -144,7 +138,7 @@ void test("operator config drives the full grab → thanks flow", async (t) => {
   });
 
   await t.test("reuses the persistent session and does not re-login", async () => {
-    const sites = loadConfig().sites;
+    const sites = config.sites;
     const site = sites.get("fake-site");
     assert.ok(site, "expected configured site");
 
@@ -167,7 +161,7 @@ void test("operator config drives the full grab → thanks flow", async (t) => {
   // the crashed page stayed cached and Playwright cannot revive one. Every
   // navigation after it failed with "Page crashed" until the process restarted.
   await t.test("a crashed page does not poison the next torrent", async () => {
-    const sites = loadConfig().sites;
+    const sites = config.sites;
     const site = sites.get("fake-site");
     assert.ok(site, "expected configured site");
 
@@ -210,24 +204,22 @@ for (const livewire of [2, 3] as const) {
       JSON.stringify({ sites: [{ id: siteId, base_url: tracker.baseUrl }] }),
     );
 
-    const originalEnv = { ...process.env };
-    process.env.SITES_CONFIG_PATH = sitesPath;
-    process.env.CACHE_DIR = join(tmpDir, "cache");
-    process.env.THANKS_ENGINE = "http";
-    process.env[`${siteId.toUpperCase().replaceAll("-", "_")}_USERNAME`] = "operator-user";
-    process.env[`${siteId.toUpperCase().replaceAll("-", "_")}_PASSWORD`] = "operator-pw";
-
-    const { loadConfig } = await import("../src/config.ts");
-    const { createThanks } = await import("../src/thank.ts");
+    const base = siteId.toUpperCase().replaceAll("-", "_");
+    const config = loadConfig({
+      SITES_CONFIG_PATH: sitesPath,
+      CACHE_DIR: join(tmpDir, "cache"),
+      THANKS_ENGINE: "http",
+      [`${base}_USERNAME`]: "operator-user",
+      [`${base}_PASSWORD`]: "operator-pw",
+    });
 
     t.after(async () => {
       await tracker.close();
       rmSync(tmpDir, { recursive: true, force: true });
-      process.env = originalEnv;
     });
 
-    const thanks = createThanks(loadConfig());
-    const site = loadConfig().sites.get(siteId);
+    const thanks = createThanks(config);
+    const site = config.sites.get(siteId);
     assert.ok(site, "expected configured site");
 
     await t.test("logs in and thanks without a browser", async () => {
@@ -352,7 +344,7 @@ for (const livewire of [2, 3] as const) {
 }
 
 /** One Site in sites.json, its credentials in env, and the engine under test. */
-async function configureSite(
+function configureSite(
   t: TestContext,
   {
     siteId,
@@ -360,27 +352,24 @@ async function configureSite(
     engine,
     password = "operator-pw",
   }: { siteId: string; baseUrl: string; engine: "browser" | "http"; password?: string },
-): Promise<{ site: Site; thanks: Thanks }> {
+): { site: Site; thanks: Thanks } {
   const tmpDir = mkdtempSync(join(tmpdir(), "thanks-bot-e2e-"));
   const sitesPath = join(tmpDir, "sites.json");
   writeFileSync(sitesPath, JSON.stringify({ sites: [{ id: siteId, base_url: baseUrl }] }));
 
-  const originalEnv = { ...process.env };
-  process.env.SITES_CONFIG_PATH = sitesPath;
-  process.env.CACHE_DIR = join(tmpDir, "cache");
-  process.env.THANKS_ENGINE = engine;
   const base = siteId.toUpperCase().replaceAll("-", "_");
-  process.env[`${base}_USERNAME`] = "operator-user";
-  process.env[`${base}_PASSWORD`] = password;
+  const config = loadConfig({
+    SITES_CONFIG_PATH: sitesPath,
+    CACHE_DIR: join(tmpDir, "cache"),
+    THANKS_ENGINE: engine,
+    [`${base}_USERNAME`]: "operator-user",
+    [`${base}_PASSWORD`]: password,
+  });
 
   t.after(() => {
     rmSync(tmpDir, { recursive: true, force: true });
-    process.env = originalEnv;
   });
 
-  const { loadConfig } = await import("../src/config.ts");
-  const { createThanks } = await import("../src/thank.ts");
-  const config = loadConfig();
   const site = config.sites.get(siteId);
   assert.ok(site, "expected the configured site");
   return { site, thanks: createThanks(config) };
@@ -394,7 +383,7 @@ for (const engine of ["http", "browser"] as const) {
     const tracker = await startFakeTracker({
       validCredentials: { username: "operator-user", password: "operator-pw" },
     });
-    const { site, thanks } = await configureSite(t, {
+    const { site, thanks } = configureSite(t, {
       siteId: `bad-login-${engine}`,
       baseUrl: tracker.baseUrl,
       engine,
@@ -436,7 +425,7 @@ void test("the browser engine skips a torrent the Site shows as already thanked"
     validCredentials: { username: "operator-user", password: "operator-pw" },
     livewire: 2,
   });
-  const { site, thanks } = await configureSite(t, {
+  const { site, thanks } = configureSite(t, {
     siteId: "browser-duplicate",
     baseUrl: tracker.baseUrl,
     engine: "browser",
