@@ -2,11 +2,13 @@ import { createServer } from "node:http";
 
 export type LoginAttempt = { username: string; ok: boolean };
 export type ThanksClick = { torrentId: string; authed: boolean; at: number };
+export type TrackerRequest = { method: string; path: string };
 
 export type FakeTracker = {
   baseUrl: string;
   logins: LoginAttempt[];
   clicks: ThanksClick[];
+  requests: TrackerRequest[];
   close: () => Promise<void>;
 };
 
@@ -20,39 +22,68 @@ function attr(value: unknown): string {
 export function startFakeTracker({
   validCredentials,
   livewire = 3,
+  rejects = [],
 }: {
   validCredentials?: { username: string; password: string };
   /** Which Livewire generation the Engine runs. Both are in production use. */
   livewire?: 2 | 3;
+  /** Torrents the Site turns down even though it renders the button enabled. */
+  rejects?: string[];
 } = {}): Promise<FakeTracker> {
   const creds = validCredentials ?? { username: "user", password: "pw" };
+  const refused = new Set(rejects);
   const sessions = new Set<string>();
   const issuedFormTokens = new Set<string>();
   const thanked = new Set<string>();
   const logins: LoginAttempt[] = [];
   const clicks: ThanksClick[] = [];
+  const requests: TrackerRequest[] = [];
+  // Livewire signs its component payloads and refuses one that came back
+  // altered, so the fake only honours the exact payloads it served.
+  const servedPayloads = new Set<string>();
 
   // Livewire 2 keys the component by `fingerprint`, 3 by `memo`; the bookmark
   // button carries the very same wire:click, so only the name tells them apart.
-  const component = (name: string, torrentId: string): string =>
-    livewire === 3
-      ? `wire:snapshot="${attr({
-          data: { torrent: [[], { key: Number(torrentId) }] },
-          memo: { id: `${name}-id`, name, path: `torrents/${torrentId}`, method: "GET" },
-          checksum: "fake-checksum",
-        })}"`
-      : `wire:initial-data="${attr({
-          fingerprint: {
-            id: `${name}-id`,
-            name,
-            locale: "es",
-            path: `torrents/${torrentId}`,
-            method: "GET",
-          },
-          effects: { listeners: [] },
-          serverMemo: { children: [], errors: [], htmlHash: "fake", data: {}, checksum: "fake" },
-        })}"`;
+  // The query string in `path` is what puts an HTML entity inside the payload.
+  const component = (name: string, torrentId: string): string => {
+    if (livewire === 3) {
+      const snapshot = {
+        data: { torrent: [[], { key: Number(torrentId) }] },
+        memo: {
+          id: `${name}-id`,
+          name,
+          path: `torrents/${torrentId}?from=list&ref=rss`,
+          method: "GET",
+        },
+        checksum: "fake-checksum",
+      };
+      servedPayloads.add(JSON.stringify(snapshot));
+      return `wire:snapshot="${attr(snapshot)}"`;
+    }
+    const initialData = {
+      fingerprint: {
+        id: `${name}-id`,
+        name,
+        locale: "es",
+        path: `torrents/${torrentId}?from=list&ref=rss`,
+        method: "GET",
+      },
+      effects: { listeners: [] },
+      serverMemo: {
+        children: [],
+        errors: [],
+        htmlHash: "fake&hash",
+        data: {},
+        checksum: "fake",
+      },
+    };
+    servedPayloads.add(JSON.stringify(initialData.serverMemo));
+    return `wire:initial-data="${attr(initialData)}"`;
+  };
 
+  // The bookmark button is rendered first on purpose: it carries the very same
+  // wire:click, so a client that just takes the first match thanks nothing. It
+  // is also rendered disabled, so reading the wrong tag's attributes shows up.
   const torrentPage = (torrentId: string): string => `<!DOCTYPE html>
 <html lang="es">
 <head>
@@ -62,10 +93,10 @@ export function startFakeTracker({
 </head>
 <body>
   <h1>Torrent ${torrentId}</h1>
+  <button ${component("bookmark-button", torrentId)} wire:click="store(${torrentId})" disabled>Favorito</button>
   <button ${component("thank-button", torrentId)} wire:click="store(${torrentId})"${
     thanked.has(torrentId) && livewire === 2 ? " disabled" : ""
   }>Agradecer</button>
-  <button ${component("bookmark-button", torrentId)} wire:click="store(${torrentId})">Favorito</button>
   <script>
     window.Livewire = { fake: true };
     const btn = Array.from(document.querySelectorAll('button'))
@@ -73,7 +104,7 @@ export function startFakeTracker({
     btn.addEventListener('click', () => {
       fetch('/livewire/update', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': '${CSRF_TOKEN}' },
         body: JSON.stringify({ torrentId: ${torrentId} }),
       }).then(() => { btn.disabled = true; });
     });
@@ -109,6 +140,7 @@ export function startFakeTracker({
 
   const server = createServer((req, res) => {
     const reqUrl = new URL(req.url ?? "/", "http://127.0.0.1");
+    requests.push({ method: req.method ?? "", path: reqUrl.pathname });
     const cookieHeader = req.headers.cookie ?? "";
     const sid = /SID=([^;]+)/.exec(cookieHeader)?.[1];
     const isAuthed = sid ? sessions.has(sid) : false;
@@ -138,7 +170,11 @@ export function startFakeTracker({
         if (ok) {
           const newSid = "sid-" + Math.random().toString(36).slice(2);
           sessions.add(newSid);
-          res.writeHead(302, { "Set-Cookie": `SID=${newSid}; Path=/; HttpOnly`, Location: "/" });
+          // The stray nameless cookie is real-world noise a jar must drop.
+          res.writeHead(302, {
+            "Set-Cookie": [`SID=${newSid}; Path=/; HttpOnly`, "=orphan; Path=/"],
+            Location: "/",
+          });
         } else {
           res.writeHead(302, { Location: "/login" });
         }
@@ -164,25 +200,34 @@ export function startFakeTracker({
       req.method === "POST";
 
     if (isLivewire) {
+      // Laravel rejects a Livewire call that arrives without the page's token.
+      if (req.headers["x-csrf-token"] !== CSRF_TOKEN) {
+        res.writeHead(419, { "Content-Type": "text/plain" });
+        res.end("Page Expired");
+        return;
+      }
       void readBody(req).then((body) => {
         const payload = JSON.parse(body) as {
           torrentId?: number; // the browser engine's own click handler
           fingerprint?: { name?: string };
+          serverMemo?: unknown;
           updates?: { payload?: { params?: number[] } }[];
           components?: { snapshot?: string; calls?: { params?: number[] }[] }[];
         };
 
         let torrentId: string;
         let component = "thank-button";
+        let signed = true;
         if (payload.components) {
-          const snapshot = JSON.parse(payload.components[0]?.snapshot ?? "{}") as {
-            memo?: { name?: string };
-          };
+          const raw = payload.components[0]?.snapshot ?? "{}";
+          const snapshot = JSON.parse(raw) as { memo?: { name?: string } };
           component = snapshot.memo?.name ?? "";
           torrentId = String(payload.components[0]?.calls?.[0]?.params?.[0]);
+          signed = servedPayloads.has(raw);
         } else if (payload.fingerprint) {
           component = payload.fingerprint.name ?? "";
           torrentId = String(payload.updates?.[0]?.payload?.params?.[0]);
+          signed = servedPayloads.has(JSON.stringify(payload.serverMemo));
         } else {
           torrentId = String(payload.torrentId);
         }
@@ -196,6 +241,14 @@ export function startFakeTracker({
         res.writeHead(200, { "Content-Type": "application/json" });
         if (component !== "thank-button") {
           res.end(JSON.stringify(dispatch("error", "Wrong component!")));
+          return;
+        }
+        if (!signed) {
+          res.end(JSON.stringify(dispatch("error", "Component payload was altered!")));
+          return;
+        }
+        if (refused.has(torrentId)) {
+          res.end(JSON.stringify(dispatch("error", "No puedes agradecer este torrent.")));
           return;
         }
         if (thanked.has(torrentId)) {
@@ -226,6 +279,7 @@ export function startFakeTracker({
         baseUrl: `http://127.0.0.1:${port}`,
         logins,
         clicks,
+        requests,
         close: () => new Promise<void>((r) => server.close(() => r())),
       });
     });

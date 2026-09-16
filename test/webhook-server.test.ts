@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startFakeQBittorrent, type FakeTorrent } from "./fake-qbittorrent.ts";
 import { startFakeTracker } from "./fake-tracker.ts";
+import { metricValue } from "./metric-probe.ts";
 
 async function startBot(
   t: TestContext,
@@ -84,6 +85,11 @@ void test("a Grab webhook thanks the torrent it names", async (t) => {
     ]),
   });
 
+  const before = await metricValue("tracker_webhooks_received_total", {
+    source: "radarr",
+    event_type: "Grab",
+  });
+
   const response = await fetch(`http://127.0.0.1:${port}/webhook/radarr`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -95,6 +101,14 @@ void test("a Grab webhook thanks the torrent it names", async (t) => {
   });
 
   assert.equal(response.status, 200);
+  assert.equal(
+    (await metricValue("tracker_webhooks_received_total", {
+      source: "radarr",
+      event_type: "Grab",
+    })) - before,
+    1,
+    "the event must be counted against the endpoint it arrived on",
+  );
   assert.deepEqual(await response.json(), {
     status: "accepted",
     hash: torrentHash.toUpperCase(),
@@ -168,4 +182,107 @@ void test("a Grab is refused unless it carries the configured secret", async (t)
 
   const accepted = await post({ "x-webhook-secret": "s3cr3t-value" });
   assert.equal(accepted.status, 200, "the configured secret must be accepted");
+});
+
+// Sonarr posts to its own endpoint and carries the hash one level down, inside
+// `release`. Reading only the top-level downloadId turns every Sonarr grab into
+// a 400, which is exactly half the bot's traffic.
+void test("a Sonarr Grab naming the hash inside release is thanked", async (t) => {
+  const tracker = await startFakeTracker({
+    validCredentials: { username: "operator-user", password: "operator-pw" },
+  });
+  t.after(() => tracker.close());
+
+  const torrentHash = "abcdef1234567890abcdef1234567890abcdef12";
+  const port = await startBot(t, {
+    siteId: "sonarr-site",
+    baseUrl: tracker.baseUrl,
+    torrents: new Map([
+      [torrentHash, { name: "Some.Show.S01E01", comment: `${tracker.baseUrl}/torrents/9876` }],
+    ]),
+  });
+
+  const before = await metricValue("tracker_webhooks_received_total", {
+    source: "sonarr",
+    event_type: "Grab",
+  });
+
+  const logged = t.mock.method(console, "log");
+
+  const response = await fetch(`http://127.0.0.1:${port}/webhook/sonarr`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      eventType: "Grab",
+      release: { downloadId: torrentHash },
+      series: { title: "Some.Show" },
+    }),
+  });
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { status: "accepted", hash: torrentHash });
+
+  await waitFor(() => tracker.clicks.length === 1, "the Sonarr grab must reach the Site");
+  assert.equal(tracker.clicks[0]?.torrentId, "9876");
+
+  const lines = logged.mock.calls.map((call) => String(call.arguments[0]));
+  assert.ok(
+    lines.some((line) => line.includes('Grab event for "Some.Show"')),
+    "the log must name the series, not report it as unknown",
+  );
+
+  const after = await metricValue("tracker_webhooks_received_total", {
+    source: "sonarr",
+    event_type: "Grab",
+  });
+  assert.equal(after - before, 1, "the event must be counted against the endpoint it arrived on");
+});
+
+// /metrics is the whole reason prom-client is a dependency; nothing else in the
+// bot reads the registry back out.
+void test("GET /metrics serves the registry in Prometheus format", async (t) => {
+  const port = await startBot(t, {
+    siteId: "metrics-site",
+    baseUrl: "https://tracker.example.com",
+  });
+
+  const response = await fetch(`http://127.0.0.1:${port}/metrics`);
+  const body = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get("content-type") ?? "", /text\/plain/);
+  assert.match(body, /tracker_webhooks_received_total/, "the bot's own metrics must be exposed");
+  assert.match(body, /app="tracker-thanks-bot"/, "the registry's default label must be applied");
+});
+
+void test("an unknown route is a 404", async (t) => {
+  const port = await startBot(t, {
+    siteId: "notfound-site",
+    baseUrl: "https://tracker.example.com",
+  });
+
+  const response = await fetch(`http://127.0.0.1:${port}/nope`);
+  assert.equal(response.status, 404);
+  assert.deepEqual(await response.json(), { error: "Not found." });
+});
+
+// The cap refuses what is past it, not what reaches it: a payload of exactly
+// the maximum is a legitimate one and must be answered, not cut off.
+void test("a body of exactly the maximum size is still served", async (t) => {
+  const port = await startBot(t, { siteId: "limit-site", baseUrl: "https://tracker.example.com" });
+
+  const maxBytes = 256 * 1024;
+  const envelope = JSON.stringify({ eventType: "Download", padding: "" });
+  const body = JSON.stringify({
+    eventType: "Download",
+    padding: "x".repeat(maxBytes - envelope.length),
+  });
+  assert.equal(Buffer.byteLength(body), maxBytes, "the test payload must sit exactly on the limit");
+
+  const response = await fetch(`http://127.0.0.1:${port}/webhook/radarr`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body,
+  });
+  assert.equal(response.status, 200);
 });

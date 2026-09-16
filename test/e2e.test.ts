@@ -1,10 +1,12 @@
-import { test } from "node:test";
+import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, rmSync, existsSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync, existsSync, readFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startFakeTracker, type ThanksClick } from "./fake-tracker.ts";
+import type { SiteConfig } from "../src/config.ts";
 import { startFakeQBittorrent } from "./fake-qbittorrent.ts";
+import { metricValue } from "./metric-probe.ts";
 
 // Assert what a step added to the Site's click log rather than the running
 // total: a total makes every later step fail once an earlier one does, and
@@ -197,6 +199,7 @@ for (const livewire of [2, 3] as const) {
     const tracker = await startFakeTracker({
       validCredentials: { username: "operator-user", password: "operator-pw" },
       livewire,
+      rejects: ["5555"],
     });
 
     const siteId = `fake-http-v${livewire}`;
@@ -230,13 +233,30 @@ for (const livewire of [2, 3] as const) {
 
     await t.test("logs in and thanks without a browser", async () => {
       const clicksBefore = tracker.clicks.length;
+      const thankedBefore = await metricValue("tracker_torrents_thanked_total", { site: siteId });
       await thank({ site, torrentId: "9876", username, password });
 
       assert.deepEqual(tracker.logins, [{ username: "operator-user", ok: true }]);
-      // The bookmark button carries the same wire:click; the fake rejects the
-      // call unless it names the thanks component, so reaching here proves the
-      // right one was invoked.
+      // The bookmark button is rendered first and carries the same wire:click;
+      // the fake also refuses a call that does not name the thanks component,
+      // so reaching here proves the right one was invoked.
       assertThanked(tracker.clicks, clicksBefore, ["9876"], "the torrent must be thanked once");
+      assert.equal(
+        (await metricValue("tracker_torrents_thanked_total", { site: siteId })) - thankedBefore,
+        1,
+        "a thanks the Site accepted must be counted as one",
+      );
+
+      // The session cookie is handed out on the redirect that answers the login
+      // POST, and a browser follows that hop with a bodyless GET.
+      const loginPost = tracker.requests.findIndex(
+        (request) => request.method === "POST" && request.path === "/login",
+      );
+      assert.deepEqual(
+        tracker.requests[loginPost + 1],
+        { method: "GET", path: "/" },
+        "the post-login redirect must be followed as a GET",
+      );
     });
 
     await t.test("reuses the stored session and does not re-login", async () => {
@@ -255,13 +275,31 @@ for (const livewire of [2, 3] as const) {
     await t.test("persists the session to disk so a restart need not re-login", () => {
       const cookies = join(tmpDir, "cache", "http-sessions", `${siteId}.json`);
       assert.ok(existsSync(cookies), "expected the cookie jar on disk");
+      assert.equal(
+        statSync(cookies).mode & 0o777,
+        0o600,
+        "a session cookie is a credential: nobody else on the host may read it",
+      );
+      // The Site also serves a nameless cookie; storing it would send garbage
+      // back on every later request.
+      const stored = JSON.parse(readFileSync(cookies, "utf-8")) as Record<string, string>;
+      assert.deepEqual(Object.keys(stored), ["SID"], "only well-formed cookies belong in the jar");
     });
 
     // Livewire 2 disables the button once thanked; Livewire 3 renders it
     // unchanged and rejects the duplicate call instead. Either way the torrent
     // must not be counted as thanked twice.
     await t.test("a torrent already thanked is not thanked again", async () => {
+      // Livewire 2 answers with a disabled button, so the duplicate is caught
+      // before the call; Livewire 3 answers by rejecting the call itself.
+      const reason = livewire === 2 ? "already_thanked" : "rejected";
       const clicksBefore = tracker.clicks.length;
+      const thankedBefore = await metricValue("tracker_torrents_thanked_total", { site: siteId });
+      const skippedBefore = await metricValue("tracker_torrents_skipped_total", {
+        site: siteId,
+        reason,
+      });
+
       await thank({ site, torrentId: "9876", username, password });
 
       assertThanked(
@@ -270,6 +308,165 @@ for (const livewire of [2, 3] as const) {
         [],
         "the duplicate must not reach the Site as a thanks",
       );
+      assert.equal(
+        (await metricValue("tracker_torrents_skipped_total", { site: siteId, reason })) -
+          skippedBefore,
+        1,
+        `the duplicate must be reported as "${reason}"`,
+      );
+      assert.equal(
+        (await metricValue("tracker_torrents_thanked_total", { site: siteId })) - thankedBefore,
+        0,
+        "a duplicate must never be counted as a thanks",
+      );
+    });
+
+    // The Site can also turn a thanks down with the button still enabled: a
+    // quota reached, a torrent that is not the Operator's. The bot has to read
+    // the refusal out of the response, which is the only place it is reported.
+    await t.test("a thanks the Site turns down is reported, not counted", async () => {
+      const clicksBefore = tracker.clicks.length;
+      const thankedBefore = await metricValue("tracker_torrents_thanked_total", { site: siteId });
+      const skippedBefore = await metricValue("tracker_torrents_skipped_total", {
+        site: siteId,
+        reason: "rejected",
+      });
+
+      await thank({ site, torrentId: "5555", username, password });
+
+      assertThanked(tracker.clicks, clicksBefore, [], "a refused thanks reached nothing");
+      assert.equal(
+        (await metricValue("tracker_torrents_skipped_total", {
+          site: siteId,
+          reason: "rejected",
+        })) - skippedBefore,
+        1,
+        "the refusal must be reported as a rejected skip",
+      );
+      assert.equal(
+        (await metricValue("tracker_torrents_thanked_total", { site: siteId })) - thankedBefore,
+        0,
+        "a refused thanks must never be counted as one",
+      );
     });
   });
 }
+
+/** One Site in sites.json, its credentials in env, and the engine under test. */
+async function configureSite(
+  t: TestContext,
+  {
+    siteId,
+    baseUrl,
+    engine,
+    password = "operator-pw",
+  }: { siteId: string; baseUrl: string; engine: "browser" | "http"; password?: string },
+): Promise<{ site: SiteConfig; username: string; password: string }> {
+  const tmpDir = mkdtempSync(join(tmpdir(), "thanks-bot-e2e-"));
+  const sitesPath = join(tmpDir, "sites.json");
+  writeFileSync(sitesPath, JSON.stringify({ sites: [{ id: siteId, base_url: baseUrl }] }));
+
+  const originalEnv = { ...process.env };
+  process.env.SITES_CONFIG_PATH = sitesPath;
+  process.env.CACHE_DIR = join(tmpDir, "cache");
+  process.env.THANKS_ENGINE = engine;
+  const base = siteId.toUpperCase().replaceAll("-", "_");
+  process.env[`${base}_USERNAME`] = "operator-user";
+  process.env[`${base}_PASSWORD`] = password;
+
+  t.after(() => {
+    rmSync(tmpDir, { recursive: true, force: true });
+    process.env = originalEnv;
+  });
+
+  const { loadSites, getSiteCredentials } = await import("../src/config.ts");
+  const site = loadSites().get(siteId);
+  assert.ok(site, "expected the configured site");
+  return { site, ...getSiteCredentials(site) };
+}
+
+// Wrong credentials are how a Site answers after the Operator rotates a
+// password, and the bot must say so: silently carrying on would thank nothing
+// night after night while every metric stayed clean.
+for (const engine of ["http", "browser"] as const) {
+  void test(`the ${engine} engine surfaces a login the Site refused`, async (t) => {
+    const tracker = await startFakeTracker({
+      validCredentials: { username: "operator-user", password: "operator-pw" },
+    });
+    const { site, username, password } = await configureSite(t, {
+      siteId: `bad-login-${engine}`,
+      baseUrl: tracker.baseUrl,
+      engine,
+      password: "the-wrong-password",
+    });
+
+    const { thank } = await import("../src/thank.ts");
+    const { closeAll } = await import("../src/browser.ts");
+    t.after(async () => {
+      await closeAll();
+      await tracker.close();
+    });
+
+    const failuresBefore = await metricValue("tracker_logins_total", {
+      site: site.id,
+      status: "failure",
+    });
+
+    await assert.rejects(
+      () => thank({ site, torrentId: "9876", username, password }),
+      /Login failed/,
+      "the Operator has to be told which credentials to check",
+    );
+
+    assert.equal(tracker.clicks.length, 0, "nothing may be thanked without a session");
+    assert.deepEqual(tracker.logins, [{ username: "operator-user", ok: false }]);
+    assert.equal(
+      (await metricValue("tracker_logins_total", { site: site.id, status: "failure" })) -
+        failuresBefore,
+      1,
+      "a refused login must be counted as one",
+    );
+  });
+}
+
+// On a Livewire 2 Site the button comes back disabled once thanked. Clicking it
+// anyway is not a no-op: Playwright waits for it to become actionable and the
+// thank hangs until it times out.
+void test("the browser engine skips a torrent the Site shows as already thanked", async (t) => {
+  const tracker = await startFakeTracker({
+    validCredentials: { username: "operator-user", password: "operator-pw" },
+    livewire: 2,
+  });
+  const { site, username, password } = await configureSite(t, {
+    siteId: "browser-duplicate",
+    baseUrl: tracker.baseUrl,
+    engine: "browser",
+  });
+
+  const { thank } = await import("../src/thank.ts");
+  const { closeAll } = await import("../src/browser.ts");
+  t.after(async () => {
+    await closeAll();
+    await tracker.close();
+  });
+
+  await thank({ site, torrentId: "9876", username, password });
+  assert.equal(tracker.clicks.length, 1, "the first thanks must reach the Site");
+
+  const skippedBefore = await metricValue("tracker_torrents_skipped_total", {
+    site: site.id,
+    reason: "already_thanked",
+  });
+
+  await thank({ site, torrentId: "9876", username, password });
+
+  assert.equal(tracker.clicks.length, 1, "a disabled button must not be clicked again");
+  assert.equal(
+    (await metricValue("tracker_torrents_skipped_total", {
+      site: site.id,
+      reason: "already_thanked",
+    })) - skippedBefore,
+    1,
+    "the skip must name the reason the Operator would look for",
+  );
+});

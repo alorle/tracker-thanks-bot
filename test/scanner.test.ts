@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startFakeTracker } from "./fake-tracker.ts";
 import { startFakeQBittorrent } from "./fake-qbittorrent.ts";
+import { metricValue } from "./metric-probe.ts";
 
 // A scan walks every torrent in one go. Over HTTP there is no renderer to slow
 // it down, so without pacing the Site takes the whole batch at network speed.
@@ -49,6 +50,8 @@ void test("the scan paces its calls to the Site", async (t) => {
     process.env = originalEnv;
   });
 
+  const scansBefore = await metricValue("tracker_scans_completed_total", { status: "success" });
+  const startedAt = Date.now();
   await scanAllTorrents(loadSites(), QBittorrentClient.fromEnv());
 
   assert.equal(tracker.clicks.length, 2, "both matching torrents must be thanked");
@@ -56,4 +59,20 @@ void test("the scan paces its calls to the Site", async (t) => {
   assert.ok(first && second, "expected two clicks to compare");
   const gap = second.at - first.at;
   assert.ok(gap >= 300, `expected the configured delay between the two Site calls, got ${gap}ms`);
+  // The delay pays for the previous call, so the first torrent must not wait.
+  assert.ok(
+    first.at - startedAt < 300,
+    `the first torrent must not be delayed, waited ${first.at - startedAt}ms`,
+  );
+
+  // The gauges are the only report a scan leaves behind: the Operator reads
+  // them in Grafana, nobody reads the log lines.
+  assert.equal(await metricValue("tracker_scan_last_torrents_processed", { result: "thanked" }), 2);
+  assert.equal(await metricValue("tracker_scan_last_torrents_processed", { result: "skipped" }), 1);
+  assert.equal(await metricValue("tracker_scan_last_torrents_processed", { result: "error" }), 0);
+  assert.equal(
+    (await metricValue("tracker_scans_completed_total", { status: "success" })) - scansBefore,
+    1,
+    "a scan with no errors must be reported as a success, not a partial run",
+  );
 });

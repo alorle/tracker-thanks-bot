@@ -20,8 +20,12 @@ void test("an unusable SCAN_HOUR is rejected instead of scheduling a runaway sca
     assert.throws(() => getScanConfig(), /SCAN_HOUR/, `expected "${value}" to be rejected`);
   }
 
+  // The accepted edges matter as much as the rejected ones: a validation that
+  // slipped one value would still pass a test that only tried 24 and -1.
   process.env.SCAN_HOUR = "0";
   assert.equal(getScanConfig().hour, 0);
+  process.env.SCAN_HOUR = "23";
+  assert.equal(getScanConfig().hour, 23);
 
   // An unset variable and one left blank in .env both mean "use the default".
   process.env.SCAN_HOUR = "";
@@ -57,6 +61,11 @@ void test("a sites.json the Operator got wrong is refused at load time", (t) => 
       "an id with uppercase in it",
       { sites: [{ id: "Site", base_url: "https://a.example.com" }] },
       /Site id "Site" is invalid/,
+    ],
+    [
+      "an id past the 32 character limit",
+      { sites: [{ id: "a".repeat(33), base_url: "https://a.example.com" }] },
+      /is invalid/,
     ],
     [
       "an id reserved for a subcommand",
@@ -157,4 +166,69 @@ void test("base_url is normalized so comment matching is not thrown off by its s
   process.env.SPELLED_PASSWORD = "operator-pw";
 
   assert.equal(loadSites(path).get("spelled")?.baseUrl, "https://tracker.example.com");
+});
+
+// SCAN_DELAY_MS paces the scan against the Site. Zero is a legitimate setting
+// (an Operator who accepts the risk), so the validation must accept it while
+// still refusing what would reach `sleep` as NaN or a negative delay.
+void test("SCAN_DELAY_MS accepts zero and refuses what would break the pacing", (t) => {
+  const original = process.env.SCAN_DELAY_MS;
+  t.after(() => {
+    if (original === undefined) delete process.env.SCAN_DELAY_MS;
+    else process.env.SCAN_DELAY_MS = original;
+  });
+
+  for (const value of ["not-a-number", "1.5", "-1"]) {
+    process.env.SCAN_DELAY_MS = value;
+    assert.throws(() => getScanConfig(), /SCAN_DELAY_MS/, `expected "${value}" to be rejected`);
+  }
+
+  process.env.SCAN_DELAY_MS = "0";
+  assert.equal(getScanConfig().delayMs, 0);
+  process.env.SCAN_DELAY_MS = "";
+  assert.equal(getScanConfig().delayMs, 1000);
+  delete process.env.SCAN_DELAY_MS;
+  assert.equal(getScanConfig().delayMs, 1000);
+});
+
+// Both switches are opt-out/opt-in by exact word: anything else keeps the
+// default, so that a typo cannot silently disable the nightly scan.
+void test("the scan switches read one exact word each", (t) => {
+  const originalEnv = { ...process.env };
+  t.after(() => {
+    process.env = originalEnv;
+  });
+
+  delete process.env.SCAN_ENABLED;
+  delete process.env.SCAN_ON_START;
+  assert.equal(getScanConfig().enabled, true, "the daily scan is on unless turned off");
+  assert.equal(getScanConfig().onStart, false, "a scan on startup is opt-in");
+
+  process.env.SCAN_ENABLED = "false";
+  assert.equal(getScanConfig().enabled, false);
+  process.env.SCAN_ENABLED = "no";
+  assert.equal(getScanConfig().enabled, true, 'only the word "false" turns the scan off');
+
+  process.env.SCAN_ON_START = "true";
+  assert.equal(getScanConfig().onStart, true);
+  process.env.SCAN_ON_START = "1";
+  assert.equal(getScanConfig().onStart, false, 'only the word "true" scans on startup');
+});
+
+// 32 characters is the documented limit, so it has to load; 33 is refused above.
+void test("an id right at the length limit still loads", (t) => {
+  const tmpDir = mkdtempSync(join(tmpdir(), "thanks-bot-config-"));
+  const id = "a".repeat(32);
+  const path = join(tmpDir, "sites.json");
+  writeFileSync(path, JSON.stringify({ sites: [{ id, base_url: "https://long.example.com" }] }));
+
+  const originalEnv = { ...process.env };
+  t.after(() => {
+    rmSync(tmpDir, { recursive: true, force: true });
+    process.env = originalEnv;
+  });
+  process.env[`${id.toUpperCase()}_USERNAME`] = "operator-user";
+  process.env[`${id.toUpperCase()}_PASSWORD`] = "operator-pw";
+
+  assert.equal(loadSites(path).get(id)?.id, id);
 });
