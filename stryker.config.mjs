@@ -21,7 +21,7 @@ export default {
     // Only the Playwright tests cover these, and those are the ones `test:fast`
     // leaves out. They still run in CI, they just stay out of this score.
     "!src/browser.ts",
-    "!src/thanks.ts",
+    "!src/browser-thanks.ts",
   ],
   // Measured, not aspirational: the suite scores 65.34% today. `break` sits just
   // under it so the build fails on a regression, not on the log-message mutants

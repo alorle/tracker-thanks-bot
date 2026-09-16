@@ -1,6 +1,6 @@
 import type { Config, Site } from "./config.ts";
 import { createBrowserContexts, enqueue, drainAll, type BrowserContexts } from "./browser.ts";
-import { thankTorrent } from "./thanks.ts";
+import { createBrowserThanks } from "./browser-thanks.ts";
 import { createHttpThanks } from "./http-thanks.ts";
 
 export type ThankTarget = {
@@ -18,6 +18,7 @@ export function createThanks(
   config: Config,
   contexts: BrowserContexts = createBrowserContexts(config.cacheDir),
 ): Thanks {
+  const thankOverBrowser = createBrowserThanks(contexts);
   const thankOverHttp = createHttpThanks(config.cacheDir);
 
   /**
@@ -29,12 +30,8 @@ export function createThanks(
   function thank({ site, torrentId }: ThankTarget): Promise<void> {
     const logPrefix = `auto-thanks:${site.id}`;
     return enqueue(site.id, async () => {
-      if (config.thanksEngine === "http") {
-        await thankOverHttp(torrentId, site, logPrefix);
-        return;
-      }
-      const page = await contexts.freshPage(site.id);
-      await thankTorrent(page, torrentId, site, logPrefix);
+      const engine = config.thanksEngine === "http" ? thankOverHttp : thankOverBrowser;
+      await engine(torrentId, site, logPrefix);
     });
   }
 
