@@ -113,6 +113,11 @@ void test("a sites.json the Operator got wrong is refused at load time", (t) => 
       { sites: [{ id: "broken", base_url: "https://a.example.com", login_button_selector: "" }] },
       /must be a non-empty string/,
     ],
+    [
+      "a login_button_selector that is not a string",
+      { sites: [{ id: "broken", base_url: "https://a.example.com", login_button_selector: 7 }] },
+      /must be a non-empty string/,
+    ],
   ];
 
   for (const [what, contents, expected] of refused) {
