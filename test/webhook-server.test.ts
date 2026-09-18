@@ -11,6 +11,7 @@ import { envVarBase, loadConfig } from "../src/config.ts";
 import { createThanks } from "../src/thank.ts";
 import { QBittorrentClient } from "../src/qbittorrent.ts";
 import { startServer } from "../src/webhook-server.ts";
+import { createTorrentThanks } from "../src/torrent-thanks.ts";
 
 async function startBot(
   t: TestContext,
@@ -40,10 +41,14 @@ async function startBot(
   });
   assert.ok(config.qbittorrent, "expected the fake qBittorrent in the config");
   const thanks = createThanks(config);
-  const server = await startServer(
+  const thankTorrent = createTorrentThanks(
     config.sites,
-    { port: 0, secret: config.webhook.secret },
     new QBittorrentClient(config.qbittorrent),
+    thanks,
+  );
+  const server = await startServer(
+    { port: 0, secret: config.webhook.secret },
+    thankTorrent,
     thanks,
   );
   const address = server.address();

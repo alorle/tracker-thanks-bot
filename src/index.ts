@@ -4,6 +4,7 @@ import { createThanks, LoginFailedError, type Thanks } from "./thank.ts";
 import { startServer } from "./webhook-server.ts";
 import { QBittorrentClient } from "./qbittorrent.ts";
 import { scanAllTorrents } from "./scanner.ts";
+import { createTorrentThanks } from "./torrent-thanks.ts";
 import { scheduleDaily } from "./scheduler.ts";
 
 function mask(value: string | undefined): string {
@@ -95,12 +96,13 @@ async function main(): Promise<void> {
 
   if (command === "serve") {
     const qbClient = qbittorrentClient(config);
-    await startServer(sites, config.webhook, qbClient, thanks);
+    const thankTorrent = createTorrentThanks(sites, qbClient, thanks);
+    await startServer(config.webhook, thankTorrent, thanks);
 
     if (scan.enabled) {
-      scheduleDaily(scan.hour, () => scanAllTorrents(sites, qbClient, thanks, scan.delayMs));
+      scheduleDaily(scan.hour, () => scanAllTorrents(qbClient, thankTorrent, scan.delayMs));
       if (scan.onStart) {
-        scanAllTorrents(sites, qbClient, thanks, scan.delayMs).catch((err) =>
+        scanAllTorrents(qbClient, thankTorrent, scan.delayMs).catch((err) =>
           log("scanner", `Initial scan failed: ${err}`),
         );
       }
@@ -111,7 +113,7 @@ async function main(): Promise<void> {
   if (command === "scan") {
     const qbClient = qbittorrentClient(config);
     try {
-      await scanAllTorrents(sites, qbClient, thanks, scan.delayMs);
+      await scanAllTorrents(qbClient, createTorrentThanks(sites, qbClient, thanks), scan.delayMs);
     } finally {
       await thanks.closeAll();
     }

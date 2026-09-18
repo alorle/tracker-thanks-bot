@@ -1,10 +1,9 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { timingSafeEqual } from "node:crypto";
 import { log } from "./log.ts";
-import type { Config, SitesMap } from "./config.ts";
-import type { QBittorrentClient } from "./qbittorrent.ts";
+import type { Config } from "./config.ts";
 import type { Thanks } from "./thank.ts";
-import { parseTorrentComment } from "./url-parser.ts";
+import type { TorrentThanks } from "./torrent-thanks.ts";
 import { registry, webhooksReceived, webhookProcessingDuration } from "./metrics.ts";
 
 const PREFIX = "webhook";
@@ -68,9 +67,7 @@ async function handleWebhook(
   req: IncomingMessage,
   res: ServerResponse,
   source: string,
-  qbClient: QBittorrentClient,
-  sites: SitesMap,
-  thanks: Thanks,
+  thankTorrent: TorrentThanks,
 ): Promise<void> {
   let body: string;
   try {
@@ -112,7 +109,7 @@ async function handleWebhook(
   jsonResponse(res, 200, { status: "accepted", hash });
 
   // Process in the background
-  processGrab(source, hash, title, qbClient, sites, thanks).catch((err) => {
+  processGrab(source, hash, title, thankTorrent).catch((err) => {
     log(PREFIX, `[${source}] Error processing grab for "${title}": ${err}`);
   });
 }
@@ -121,29 +118,21 @@ async function processGrab(
   source: string,
   hash: string,
   title: string,
-  qbClient: QBittorrentClient,
-  sites: SitesMap,
-  thanks: Thanks,
+  thankTorrent: TorrentThanks,
 ): Promise<void> {
   const stopTimer = webhookProcessingDuration.startTimer({ source });
 
-  log(PREFIX, `[${source}] Querying qBittorrent for torrent comment (hash: ${hash})...`);
-  const comment = await qbClient.getTorrentCommentWithRetry(hash);
-
-  const target = parseTorrentComment(sites, comment);
-  if (!target) {
+  const result = await thankTorrent(hash, { waitForComment: true });
+  if (result.status === "no_comment" || result.status === "no_site") {
+    const comment = result.status === "no_site" ? result.comment : "";
     log(PREFIX, `[${source}] No matching site URL in comment: "${comment}". Skipping.`);
     stopTimer({ site: "unknown" });
     return;
   }
 
-  const { site, torrentId } = target;
-  log(PREFIX, `[${source}] Matched ${site.id} torrent ${torrentId} for "${title}".`);
-
-  await thanks.thank(target);
-
+  const { site, torrentId } = result.target;
   stopTimer({ site: site.id });
-  log(PREFIX, `[${source}] Done processing "${title}".`);
+  log(PREFIX, `[${source}] Done processing "${title}" (${site.id} torrent ${torrentId}).`);
 }
 
 async function gracefulShutdown(signal: string, server: Server, thanks: Thanks): Promise<void> {
@@ -170,9 +159,8 @@ async function gracefulShutdown(signal: string, server: Server, thanks: Thanks):
 }
 
 export async function startServer(
-  sites: SitesMap,
   webhook: Config["webhook"],
-  qbClient: QBittorrentClient,
+  thankTorrent: TorrentThanks,
   thanks: Thanks,
 ): Promise<Server> {
   const { port, secret: webhookSecret } = webhook;
@@ -211,7 +199,7 @@ export async function startServer(
         return;
       }
       const source = req.url === "/webhook/radarr" ? "radarr" : "sonarr";
-      handleWebhook(req, res, source, qbClient, sites, thanks).catch((err) => {
+      handleWebhook(req, res, source, thankTorrent).catch((err) => {
         log(PREFIX, `Unhandled error in ${source} handler: ${err}`);
         if (!res.headersSent) jsonResponse(res, 500, { error: "Internal server error." });
       });

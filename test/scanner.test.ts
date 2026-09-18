@@ -10,6 +10,7 @@ import { loadConfig } from "../src/config.ts";
 import { createThanks } from "../src/thank.ts";
 import { QBittorrentClient } from "../src/qbittorrent.ts";
 import { scanAllTorrents } from "../src/scanner.ts";
+import { createTorrentThanks } from "../src/torrent-thanks.ts";
 
 // A scan walks every torrent in one go. Over HTTP there is no renderer to slow
 // it down, so without pacing the Site takes the whole batch at network speed.
@@ -52,10 +53,10 @@ void test("the scan paces its calls to the Site", async (t) => {
   const scansBefore = await metricValue("tracker_scans_completed_total", { status: "success" });
   const startedAt = Date.now();
   assert.ok(config.qbittorrent, "expected the fake qBittorrent in the config");
+  const qbClient = new QBittorrentClient(config.qbittorrent);
   await scanAllTorrents(
-    config.sites,
-    new QBittorrentClient(config.qbittorrent),
-    createThanks(config),
+    qbClient,
+    createTorrentThanks(config.sites, qbClient, createThanks(config)),
     config.scan.delayMs,
   );
 
@@ -122,10 +123,10 @@ void test("a torrent the Site does not thank is counted as skipped", async (t) =
   });
 
   assert.ok(config.qbittorrent, "expected the fake qBittorrent in the config");
+  const qbClient = new QBittorrentClient(config.qbittorrent);
   await scanAllTorrents(
-    config.sites,
-    new QBittorrentClient(config.qbittorrent),
-    createThanks(config),
+    qbClient,
+    createTorrentThanks(config.sites, qbClient, createThanks(config)),
     config.scan.delayMs,
   );
 

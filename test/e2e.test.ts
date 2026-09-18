@@ -5,11 +5,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startFakeTracker, type ThanksClick } from "./fake-tracker.ts";
 import type { Site } from "../src/config.ts";
-import type { Thanks } from "../src/thank.ts";
+import type { Thanks, ThankTarget } from "../src/thank.ts";
 import { startFakeQBittorrent } from "./fake-qbittorrent.ts";
 import { metricValue } from "./metric-probe.ts";
 import { loadConfig } from "../src/config.ts";
-import { parseTorrentComment } from "../src/url-parser.ts";
+import { createTorrentThanks } from "../src/torrent-thanks.ts";
 import { QBittorrentClient } from "../src/qbittorrent.ts";
 import { createBrowserContexts, enqueue } from "../src/browser.ts";
 import { createThanks, LoginFailedError } from "../src/thank.ts";
@@ -102,13 +102,22 @@ void test("operator config drives the full grab → thanks flow", async (t) => {
   await t.test("identifies the Site from a qBittorrent comment", async () => {
     assert.ok(config.qbittorrent, "expected the fake qBittorrent in the config");
     const qbClient = new QBittorrentClient(config.qbittorrent);
-    const comment = await qbClient.getTorrentComment(torrentHash);
-    assert.match(comment, /\/torrents\/9876/);
+    assert.match(await qbClient.getTorrentComment(torrentHash), /\/torrents\/9876/);
 
-    const parsed = parseTorrentComment(config.sites, comment);
-    assert.ok(parsed, "expected parser to match the configured base_url");
-    assert.equal(parsed.site.id, "fake-site");
-    assert.equal(parsed.torrentId, trackerTorrentId);
+    const targets: ThankTarget[] = [];
+    const thankTorrent = createTorrentThanks(config.sites, qbClient, {
+      thank: (target) => {
+        targets.push(target);
+        return Promise.resolve({ status: "skipped", reason: "no_button" });
+      },
+      drainAll: () => Promise.resolve(),
+      closeAll: () => Promise.resolve(),
+    });
+    await thankTorrent(torrentHash);
+
+    assert.equal(targets.length, 1, "expected the comment to match the configured base_url");
+    assert.equal(targets[0]?.site.id, "fake-site");
+    assert.equal(targets[0]?.torrentId, trackerTorrentId);
   });
 
   await t.test("derives credentials from the Site id", () => {

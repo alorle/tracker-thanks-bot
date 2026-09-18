@@ -37,6 +37,13 @@ by the Site with the button still on offer — a quota reached, a torrent that i
 not the Operator's.
 _Avoid_: like, upvote, ack
 
+**Torrent**:
+One download, carrying two ids: the info hash qBittorrent knows it by, and the
+numeric id the **Site** knows it by. Nothing relates them but the torrent's
+comment in qBittorrent, which names the Site's URL and that id — matching it
+against the configured Sites is what turns a hash into a **Thanks**.
+_Avoid_: release, download, grab (the webhook event, not the thing it names)
+
 ## Flagged ambiguities
 
 - **"Site identifier"**: historically there were three names per Site (map key,
