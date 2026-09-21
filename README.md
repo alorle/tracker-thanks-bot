@@ -164,11 +164,20 @@ Key metrics exposed (all prefixed with `tracker_`):
 - `webhooks_received_total{source,event_type}`
 - `webhook_processing_duration_seconds{source,site}`
 - `torrents_thanked_total{site}`, `torrents_skipped_total{site,reason}`, `torrents_errored_total{site}`
+  — `reason` is one of `no_button`, `already_thanked`, `quota_exhausted`, `not_eligible`, `rejected`
 - `thank_duration_seconds{site}`
 - `scans_completed_total{status}`, `scan_duration_seconds`, `scan_last_torrents_processed{result}`
 - `qbittorrent_api_duration_seconds{endpoint}`, `qbittorrent_api_errors_total{endpoint}`
 - `logins_total{site,status}`
 - Plus the default Node.js process metrics.
+
+## Refusals
+
+A Site can take the thanks, or turn it down with the button still on offer. It says so in its own prose, in whatever language it is installed in, and the bot has to decide what that prose meant before it can act on it.
+
+Two of those refusals come from Livewire rather than from the Site — `Component payload was altered!` and `Wrong component!` — and mean the bot built a bad request. Those are matched literally, with no network call, and counted as errors rather than skips.
+
+The rest are the Site's own words, and are recorded as `rejected`.
 
 ## License
 

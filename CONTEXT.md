@@ -37,6 +37,16 @@ by the Site with the button still on offer — a quota reached, a torrent that i
 not the Operator's.
 _Avoid_: like, upvote, ack
 
+**Refusal**:
+The **Site** turning a **Thanks** down with the button still on offer, in its own
+prose and in whatever language it is installed in. A Refusal is placed in one of
+a handful of reasons the bot can act on — the quota is spent, the torrent is not
+one this account may thank, it was already thanked — or left unplaced, which is
+what the bot did with every Refusal before it could read them. A Refusal is the
+Site speaking to the **Operator**; Livewire turning down a malformed call of ours
+is not one, and counts as an error.
+_Avoid_: rejection (the reason, not the reply), error, failure
+
 **Torrent**:
 One download, carrying two ids: the info hash qBittorrent knows it by, and the
 numeric id the **Site** knows it by. Nothing relates them but the torrent's

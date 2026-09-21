@@ -6,8 +6,8 @@ import { join } from "node:path";
 import { startFakeTracker } from "./fake-tracker.ts";
 import { startFakeQBittorrent } from "./fake-qbittorrent.ts";
 import { metricValue } from "./metric-probe.ts";
-import { loadConfig } from "../src/config.ts";
-import { createThanks } from "../src/thank.ts";
+import { loadConfig, type Site, type SitesMap } from "../src/config.ts";
+import { createThanks, type Thanks } from "../src/thank.ts";
 import { QBittorrentClient } from "../src/qbittorrent.ts";
 import { scanAllTorrents } from "../src/scanner.ts";
 import { createTorrentThanks } from "../src/torrent-thanks.ts";
@@ -145,5 +145,57 @@ void test("a torrent the Site does not thank is counted as skipped", async (t) =
     await metricValue("tracker_scan_last_torrents_processed", { result: "error" }),
     0,
     "a Site turning a thanks down is not an error",
+  );
+});
+
+function pausableSites(): SitesMap {
+  const make = (id: string, baseUrl: string): Site => ({
+    id,
+    baseUrl,
+    loginButtonSelector: 'button[type="submit"]',
+    username: "operator-user",
+    password: "operator-pw",
+  });
+  return new Map([
+    ["capped", make("capped", "https://capped.example.com")],
+    ["open", make("open", "https://open.example.com")],
+  ]);
+}
+
+void test("a Site that runs out of thanks is left alone for the rest of the scan", async () => {
+  const comments = new Map([
+    ["h1", "https://capped.example.com/torrents/1"],
+    ["h2", "https://capped.example.com/torrents/2"],
+    ["h3", "https://open.example.com/torrents/3"],
+    ["h4", "https://capped.example.com/torrents/4"],
+  ]);
+
+  const qbClient = {
+    listTorrents: () =>
+      Promise.resolve([...comments.keys()].map((hash) => ({ hash, name: `Torrent ${hash}` }))),
+    getTorrentComment: (hash: string) => Promise.resolve(comments.get(hash) ?? ""),
+    getTorrentCommentWithRetry: (hash: string) => Promise.resolve(comments.get(hash) ?? ""),
+  };
+
+  const attempted: string[] = [];
+  const thanks: Thanks = {
+    thank: ({ site, torrentId }) => {
+      attempted.push(`${site.id}/${torrentId}`);
+      return Promise.resolve(
+        site.id === "capped"
+          ? { status: "skipped", reason: "quota_exhausted", message: "límite alcanzado" }
+          : { status: "thanked", detail: "clicked" },
+      );
+    },
+    drainAll: () => Promise.resolve(),
+    closeAll: () => Promise.resolve(),
+  };
+
+  await scanAllTorrents(qbClient, createTorrentThanks(pausableSites(), qbClient, thanks), 0);
+
+  assert.deepEqual(
+    attempted,
+    ["capped/1", "open/3"],
+    "once a Site says it is out of thanks the scan must stop calling it, and only it",
   );
 });

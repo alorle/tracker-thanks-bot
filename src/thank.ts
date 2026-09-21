@@ -1,4 +1,5 @@
 import { envVarBase, type Config, type Site } from "./config.ts";
+import { classifyRejection, type ClassifyRejection } from "./rejection.ts";
 import { createBrowserContexts, enqueue, drainAll, type BrowserContexts } from "./browser.ts";
 import { createBrowserThanks } from "./browser-thanks.ts";
 import { createHttpThanks } from "./http-thanks.ts";
@@ -21,7 +22,15 @@ export class LoginFailedError extends Error {
   }
 }
 
-export type SkipReason = "no_button" | "already_thanked" | "rejected";
+export class ThanksRefusedAsInvalidError extends Error {
+  constructor(torrentId: string, message: string) {
+    super(`The Site turned down the thanks call for torrent ${torrentId} as invalid: ${message}`);
+    this.name = "ThanksRefusedAsInvalidError";
+  }
+}
+
+export type SkipReason =
+  "no_button" | "already_thanked" | "quota_exhausted" | "not_eligible" | "rejected";
 
 export type ThanksOutcome =
   | { status: "thanked"; detail: string }
@@ -40,7 +49,28 @@ function skipMessage(outcome: { reason: SkipReason; message?: string }, torrentI
   if (outcome.reason === "already_thanked") {
     return `Torrent ${torrentId} already thanked. Skipping.`;
   }
-  return `Site rejected thanks for torrent ${torrentId}: ${outcome.message ?? "unknown error"}`;
+  const detail = outcome.message ?? "unknown error";
+  if (outcome.reason === "quota_exhausted") {
+    return `Site is out of thanks for now, refusing torrent ${torrentId}: ${detail}`;
+  }
+  if (outcome.reason === "not_eligible") {
+    return `Site will not take thanks for torrent ${torrentId}: ${detail}`;
+  }
+  return `Site rejected thanks for torrent ${torrentId}: ${detail}`;
+}
+
+async function place(
+  outcome: ThanksOutcome,
+  classify: ClassifyRejection,
+  torrentId: string,
+): Promise<ThanksOutcome> {
+  if (outcome.status !== "skipped" || outcome.reason !== "rejected") return outcome;
+
+  const message = outcome.message ?? "";
+  const reason = await classify(message);
+  if (reason === "protocol_error") throw new ThanksRefusedAsInvalidError(torrentId, message);
+  if (reason === "other") return outcome;
+  return { ...outcome, reason };
 }
 
 function record(outcome: ThanksOutcome, site: Site, torrentId: string, logPrefix: string): void {
@@ -62,6 +92,7 @@ export type Thanks = {
 export function createThanks(
   config: Config,
   contexts: BrowserContexts = createBrowserContexts(config.cacheDir),
+  classify: ClassifyRejection = classifyRejection,
 ): Thanks {
   const thankOverBrowser = createBrowserThanks(contexts);
   const thankOverHttp = createHttpThanks(config.cacheDir);
@@ -78,7 +109,7 @@ export function createThanks(
       const engine = config.thanksEngine === "http" ? thankOverHttp : thankOverBrowser;
       const stopTimer = thankDuration.startTimer({ site: site.id });
       try {
-        const outcome = await engine(torrentId, site, logPrefix);
+        const outcome = await place(await engine(torrentId, site, logPrefix), classify, torrentId);
         record(outcome, site, torrentId, logPrefix);
         return outcome;
       } catch (err) {

@@ -17,6 +17,7 @@ export async function scanAllTorrents(
   const torrents = await qbClient.listTorrents();
   log(PREFIX, `Found ${torrents.length} torrent(s) in qBittorrent.`);
 
+  const pausedSites = new Set<string>();
   let siteTouched = false;
   let thankedCount = 0;
   let skippedCount = 0;
@@ -32,15 +33,30 @@ export async function scanAllTorrents(
         siteTouched = false;
       }
 
-      const result = await thankTorrent(torrent.hash);
-      if (result.status === "no_comment" || result.status === "no_site") {
+      const result = await thankTorrent(torrent.hash, {
+        skipSite: (site) => pausedSites.has(site.id),
+      });
+      if (
+        result.status === "no_comment" ||
+        result.status === "no_site" ||
+        result.status === "site_paused"
+      ) {
         skippedCount++;
         continue;
       }
 
       siteTouched = true;
-      if (result.status === "thanked") thankedCount++;
-      else skippedCount++;
+      if (result.status === "thanked") {
+        thankedCount++;
+        continue;
+      }
+
+      skippedCount++;
+      if (result.outcome.status === "skipped" && result.outcome.reason === "quota_exhausted") {
+        const { id } = result.target.site;
+        pausedSites.add(id);
+        log(PREFIX, `${id} is out of thanks; leaving it alone for the rest of this scan.`);
+      }
     } catch (err) {
       log(PREFIX, `Error processing torrent "${torrent.name}": ${String(err)}`);
       errorCount++;
