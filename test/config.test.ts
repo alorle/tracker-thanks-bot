@@ -108,16 +108,6 @@ void test("a sites.json the Operator got wrong is refused at load time", (t) => 
       { sites: [{ id: "broken" }] },
       /missing required string field "base_url"/,
     ],
-    [
-      "an empty login_button_selector",
-      { sites: [{ id: "broken", base_url: "https://a.example.com", login_button_selector: "" }] },
-      /must be a non-empty string/,
-    ],
-    [
-      "a login_button_selector that is not a string",
-      { sites: [{ id: "broken", base_url: "https://a.example.com", login_button_selector: 7 }] },
-      /must be a non-empty string/,
-    ],
   ];
 
   for (const [what, contents, expected] of refused) {
@@ -208,16 +198,6 @@ void test("an unusable WEBHOOK_PORT is rejected instead of opening a random one"
   assert.equal(loadConfig({ ...env, WEBHOOK_PORT: "65535" }).webhook.port, 65535);
   assert.equal(loadConfig({ ...env, WEBHOOK_PORT: "" }).webhook.port, 3000);
   assert.equal(loadConfig(env).webhook.port, 3000);
-});
-
-void test("only the exact word http selects the browserless engine", (t) => {
-  const env = configEnv(t);
-
-  assert.equal(loadConfig({ ...env, THANKS_ENGINE: "http" }).thanksEngine, "http");
-  assert.equal(loadConfig({ ...env, THANKS_ENGINE: "browser" }).thanksEngine, "browser");
-  assert.equal(loadConfig({ ...env, THANKS_ENGINE: "HTTP" }).thanksEngine, "browser");
-  assert.equal(loadConfig({ ...env, THANKS_ENGINE: "" }).thanksEngine, "browser");
-  assert.equal(loadConfig(env).thanksEngine, "browser");
 });
 
 void test("qBittorrent is configured from an API key, from a password, or not at all", (t) => {

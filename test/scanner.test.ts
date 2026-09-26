@@ -35,7 +35,6 @@ void test("the scan paces its calls to the Site", async (t) => {
   const config = loadConfig({
     SITES_CONFIG_PATH: sitesPath,
     CACHE_DIR: join(tmpDir, "cache"),
-    THANKS_ENGINE: "http",
     PACED_USERNAME: "operator-user",
     PACED_PASSWORD: "operator-pw",
     QBIT_URL: qbit.baseUrl,
@@ -107,7 +106,6 @@ void test("a torrent the Site does not thank is counted as skipped", async (t) =
   const config = loadConfig({
     SITES_CONFIG_PATH: sitesPath,
     CACHE_DIR: join(tmpDir, "cache"),
-    THANKS_ENGINE: "http",
     TALLY_USERNAME: "operator-user",
     TALLY_PASSWORD: "operator-pw",
     QBIT_URL: qbit.baseUrl,
@@ -152,7 +150,6 @@ function pausableSites(): SitesMap {
   const make = (id: string, baseUrl: string): Site => ({
     id,
     baseUrl,
-    loginButtonSelector: 'button[type="submit"]',
     username: "operator-user",
     password: "operator-pw",
   });
@@ -188,7 +185,6 @@ void test("a Site that runs out of thanks is left alone for the rest of the scan
       );
     },
     drainAll: () => Promise.resolve(),
-    closeAll: () => Promise.resolve(),
   };
 
   await scanAllTorrents(qbClient, createTorrentThanks(pausableSites(), qbClient, thanks), 0);

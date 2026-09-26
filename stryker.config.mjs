@@ -3,12 +3,10 @@
 export default {
   packageManager: "npm",
   testRunner: "command",
-  // node:test has no Stryker plugin, so the suite runs as a command. `test:fast`
+  // node:test has no Stryker plugin, so the suite runs as a command. `test:only`
   // skips the type-check `npm test` does first — a mutant that fails to compile
-  // would count as killed without a single test having run — and leaves out the
-  // Playwright tests, which cost ten times the rest of the suite put together
-  // and would turn every run into hours.
-  commandRunner: { command: "npm run test:fast" },
+  // would count as killed without a single test having run.
+  commandRunner: { command: "npm run test:only" },
   coverageAnalysis: "off",
   mutate: [
     "src/**/*.ts",
@@ -18,10 +16,6 @@ export default {
     // Metric declarations. Their values are asserted through the code that
     // writes them, which is where the mutants belong.
     "!src/metrics.ts",
-    // Only the Playwright tests cover these, and those are the ones `test:fast`
-    // leaves out. They still run in CI, they just stay out of this score.
-    "!src/browser.ts",
-    "!src/browser-thanks.ts",
   ],
   // Measured, not aspirational: the suite scores 65.34% today. `break` sits just
   // under it so the build fails on a regression, not on the log-message mutants

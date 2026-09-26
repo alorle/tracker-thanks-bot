@@ -97,18 +97,6 @@ export function startFakeTracker({
   <button ${component("thank-button", torrentId)} wire:click="store(${torrentId})"${
     thanked.has(torrentId) && livewire === 2 ? " disabled" : ""
   }>Agradecer</button>
-  <script>
-    window.Livewire = { fake: true };
-    const btn = Array.from(document.querySelectorAll('button'))
-      .find((b) => b.textContent.includes('Agradecer'));
-    btn.addEventListener('click', () => {
-      fetch('/livewire/update', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': '${CSRF_TOKEN}' },
-        body: JSON.stringify({ torrentId: ${torrentId} }),
-      }).then(() => { btn.disabled = true; });
-    });
-  </script>
 </body>
 </html>`;
 
@@ -208,14 +196,13 @@ export function startFakeTracker({
       }
       void readBody(req).then((body) => {
         const payload = JSON.parse(body) as {
-          torrentId?: number; // the browser engine's own click handler
           fingerprint?: { name?: string };
           serverMemo?: unknown;
           updates?: { payload?: { params?: number[] } }[];
           components?: { snapshot?: string; calls?: { params?: number[] }[] }[];
         };
 
-        let torrentId: string;
+        let torrentId = "";
         let component = "thank-button";
         let signed = true;
         if (payload.components) {
@@ -228,8 +215,6 @@ export function startFakeTracker({
           component = payload.fingerprint.name ?? "";
           torrentId = String(payload.updates?.[0]?.payload?.params?.[0]);
           signed = servedPayloads.has(JSON.stringify(payload.serverMemo));
-        } else {
-          torrentId = String(payload.torrentId);
         }
 
         // A real Site answers 200 whatever happens; the outcome is dispatched.

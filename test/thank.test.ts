@@ -4,30 +4,13 @@ import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig, type Config, type Site } from "../src/config.ts";
-import type { BrowserContexts } from "../src/browser.ts";
 import { createThanks, ThanksRefusedAsInvalidError } from "../src/thank.ts";
 import { startFakeTracker } from "./fake-tracker.ts";
 import { histogramCount, metricValue } from "./metric-probe.ts";
 
-type SpyContexts = BrowserContexts & { opened: string[] };
-
-function stubContexts(): SpyContexts {
-  const opened: string[] = [];
-  return {
-    opened,
-    getContext: () => Promise.reject(new Error("the seam must not reach for a context")),
-    freshPage: (siteKey: string) => {
-      opened.push(siteKey);
-      return Promise.reject(new Error("browser engine reached"));
-    },
-    closeAll: () => Promise.resolve(),
-  };
-}
-
 function configuredSite(
   t: TestContext,
   id: string,
-  engine?: string,
   baseUrl = "http://127.0.0.1:1",
 ): { config: Config; site: Site } {
   const tmpDir = mkdtempSync(join(tmpdir(), "thanks-bot-seam-"));
@@ -40,7 +23,6 @@ function configuredSite(
   const config = loadConfig({
     SITES_CONFIG_PATH: path,
     CACHE_DIR: join(tmpDir, "cache"),
-    ...(engine === undefined ? {} : { THANKS_ENGINE: engine }),
     [`${base}_USERNAME`]: "operator-user",
     [`${base}_PASSWORD`]: "operator-pw",
   });
@@ -50,34 +32,12 @@ function configuredSite(
   return { config, site };
 }
 
-void test("an unset THANKS_ENGINE sends a Site to Playwright, not to the endpoint", async (t) => {
-  const { config, site } = configuredSite(t, "picks-browser");
-  const contexts = stubContexts();
-
-  await assert.rejects(
-    () => createThanks(config, contexts).thank({ site, torrentId: "9876" }),
-    /browser engine reached/,
-    "an unset THANKS_ENGINE must reach the Playwright engine",
-  );
-  assert.deepEqual(contexts.opened, ["picks-browser"], "the page must be opened for that Site");
-});
-
-void test("the http engine thanks without ever opening a page", async (t) => {
-  const { config, site } = configuredSite(t, "picks-http", "http");
-  const contexts = stubContexts();
-
-  await assert.rejects(() => createThanks(config, contexts).thank({ site, torrentId: "9876" }));
-  assert.deepEqual(contexts.opened, [], "the http engine must not reach for a browser page");
-});
-
 void test("a Thanks that blows up is counted and timed against its Site", async (t) => {
   const { config, site } = configuredSite(t, "records-both");
-  const contexts = stubContexts();
-
   const erroredBefore = await metricValue("tracker_torrents_errored_total", { site: site.id });
   const timedBefore = await histogramCount("tracker_thank_duration_seconds", { site: site.id });
 
-  await assert.rejects(() => createThanks(config, contexts).thank({ site, torrentId: "9876" }));
+  await assert.rejects(() => createThanks(config).thank({ site, torrentId: "9876" }));
 
   assert.equal(
     (await metricValue("tracker_torrents_errored_total", { site: site.id })) - erroredBefore,
@@ -98,7 +58,7 @@ async function refusingSite(t: TestContext, id: string, torrentId: string) {
     rejects: [torrentId],
   });
   t.after(() => tracker.close());
-  return configuredSite(t, id, "http", tracker.baseUrl);
+  return configuredSite(t, id, tracker.baseUrl);
 }
 
 void test("a refusal the classifier places is recorded under that reason", async (t) => {
@@ -108,7 +68,7 @@ void test("a refusal the classifier places is recorded under that reason", async
     reason: "quota_exhausted",
   });
 
-  const thanks = createThanks(config, stubContexts(), () => Promise.resolve("quota_exhausted"));
+  const thanks = createThanks(config, () => Promise.resolve("quota_exhausted"));
   const outcome = await thanks.thank({ site, torrentId: "9876" });
 
   assert.equal(outcome.status, "skipped");
@@ -135,7 +95,7 @@ void test("a refusal aimed at our own payload is an error, not a skip", async (t
     reason: "rejected",
   });
 
-  const thanks = createThanks(config, stubContexts(), () => Promise.resolve("protocol_error"));
+  const thanks = createThanks(config, () => Promise.resolve("protocol_error"));
 
   await assert.rejects(
     () => thanks.thank({ site, torrentId: "9876" }),
@@ -160,7 +120,7 @@ void test("only a refusal reaches the classifier, and with the Site's own words"
   const { config, site } = await refusingSite(t, "asks-once", "9876");
 
   const asked: string[] = [];
-  const thanks = createThanks(config, stubContexts(), (message) => {
+  const thanks = createThanks(config, (message) => {
     asked.push(message);
     return Promise.resolve("not_eligible");
   });

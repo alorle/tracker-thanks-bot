@@ -6,7 +6,6 @@ import type { QBittorrentConfig } from "./qbittorrent.ts";
 export type Site = {
   id: string;
   baseUrl: string;
-  loginButtonSelector: string;
   username: string;
   password: string;
 };
@@ -15,12 +14,9 @@ export type SitesMap = Map<string, Site>;
 
 type SiteSettings = Omit<Site, "username" | "password">;
 
-export type ThanksEngine = "browser" | "http";
-
 export type Config = {
   sitesPath: string;
   cacheDir: string;
-  thanksEngine: ThanksEngine;
   sites: SitesMap;
   qbittorrent: QBittorrentConfig | null;
   webhook: { port: number; secret: string | null };
@@ -40,12 +36,10 @@ const RESERVED_IDS = new Set([
   "login",
   "test",
 ]);
-const DEFAULT_LOGIN_BUTTON_SELECTOR = 'button[type="submit"]';
 
 type RawSiteEntry = {
   id?: unknown;
   base_url?: unknown;
-  login_button_selector?: unknown;
 };
 
 type RawSitesFile = {
@@ -132,15 +126,7 @@ export function loadSites(path: string, env: NodeJS.ProcessEnv): SitesMap {
     }
     seenBaseUrls.set(baseUrl, id);
 
-    const loginButtonSelector =
-      entry.login_button_selector === undefined
-        ? DEFAULT_LOGIN_BUTTON_SELECTOR
-        : entry.login_button_selector;
-    if (typeof loginButtonSelector !== "string" || loginButtonSelector.length === 0) {
-      fail(`Site "${id}" field "login_button_selector" must be a non-empty string.`);
-    }
-
-    settings.set(id, { id, baseUrl, loginButtonSelector });
+    settings.set(id, { id, baseUrl });
   }
 
   const missing: string[] = [];
@@ -170,18 +156,6 @@ function requiredEnv(env: NodeJS.ProcessEnv, name: string): string {
 
 function cacheDir(env: NodeJS.ProcessEnv): string {
   return env.CACHE_DIR ?? join(import.meta.dirname, "..", ".cache");
-}
-
-/**
- * Which engine performs the Thanks.
- *
- * "browser" drives Playwright (the original path); "http" talks to the Engine's
- * Livewire endpoint directly, which needs no renderer and so cannot be
- * OOM-killed. The flag exists so the two can be swapped without a redeploy of
- * a different image.
- */
-function thanksEngine(env: NodeJS.ProcessEnv): ThanksEngine {
-  return env.THANKS_ENGINE === "http" ? "http" : "browser";
 }
 
 function qbittorrentConfig(env: NodeJS.ProcessEnv): QBittorrentConfig | null {
@@ -240,7 +214,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   return {
     sitesPath,
     cacheDir: cacheDir(env),
-    thanksEngine: thanksEngine(env),
     sites: loadSites(sitesPath, env),
     qbittorrent: qbittorrentConfig(env),
     webhook: webhookConfig(env),

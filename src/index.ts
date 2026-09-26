@@ -34,7 +34,6 @@ function logConfig(config: Config): void {
     ["SITES_CONFIG_PATH", config.sitesPath],
     ...siteVars,
     ["CACHE_DIR", config.cacheDir],
-    ["THANKS_ENGINE", config.thanksEngine],
     ["SCAN_ENABLED", String(config.scan.enabled)],
     ["SCAN_HOUR", String(config.scan.hour)],
     ["SCAN_ON_START", String(config.scan.onStart)],
@@ -63,18 +62,14 @@ async function runCli(
 
   log(logPrefix, `Processing ${torrentIds.length} torrent(s)...`);
 
-  try {
-    for (const torrentId of torrentIds) {
-      try {
-        await thanks.thank({ site, torrentId });
-      } catch (error) {
-        if (error instanceof LoginFailedError) throw error;
-        const message = error instanceof Error ? error.message : String(error);
-        log(logPrefix, `Error processing torrent ${torrentId}: ${message}`);
-      }
+  for (const torrentId of torrentIds) {
+    try {
+      await thanks.thank({ site, torrentId });
+    } catch (error) {
+      if (error instanceof LoginFailedError) throw error;
+      const message = error instanceof Error ? error.message : String(error);
+      log(logPrefix, `Error processing torrent ${torrentId}: ${message}`);
     }
-  } finally {
-    await thanks.closeAll();
   }
 
   log(logPrefix, "Done.");
@@ -112,11 +107,7 @@ async function main(): Promise<void> {
 
   if (command === "scan") {
     const qbClient = qbittorrentClient(config);
-    try {
-      await scanAllTorrents(qbClient, createTorrentThanks(sites, qbClient, thanks), scan.delayMs);
-    } finally {
-      await thanks.closeAll();
-    }
+    await scanAllTorrents(qbClient, createTorrentThanks(sites, qbClient, thanks), scan.delayMs);
     return;
   }
 
@@ -142,7 +133,7 @@ Other environment variables:
   WEBHOOK_PORT                   Webhook server port (default: 3000)
   WEBHOOK_SECRET                 Shared secret required in X-Webhook-Secret header (optional but recommended)
   SITES_CONFIG_PATH              Path to sites.json (default: <repo>/config/sites.json or /app/config/sites.json in Docker)
-  CACHE_DIR                      Browser session cache directory
+  CACHE_DIR                      Session cookie cache directory
   SCAN_ENABLED                   Enable daily scan (default: true)
   SCAN_HOUR                      Hour to run daily scan, 0-23 (default: 3)
   SCAN_ON_START                  Run scan on startup (default: false)`);

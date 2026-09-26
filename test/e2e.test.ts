@@ -11,7 +11,6 @@ import { metricValue } from "./metric-probe.ts";
 import { loadConfig } from "../src/config.ts";
 import { createTorrentThanks } from "../src/torrent-thanks.ts";
 import { QBittorrentClient } from "../src/qbittorrent.ts";
-import { createBrowserContexts, enqueue } from "../src/browser.ts";
 import { createThanks, LoginFailedError } from "../src/thank.ts";
 
 // Assert what a step added to the Site's click log rather than the running
@@ -72,18 +71,15 @@ void test("operator config drives the full grab → thanks flow", async (t) => {
   const config = loadConfig({
     SITES_CONFIG_PATH: sitesPath,
     CACHE_DIR: join(tmpDir, "cache"),
-    THANKS_ENGINE: "browser",
     FAKE_SITE_USERNAME: "operator-user",
     FAKE_SITE_PASSWORD: "operator-pw",
     QBIT_URL: qbit.baseUrl,
     QBIT_USERNAME: "qbit-user",
     QBIT_PASSWORD: "qbit-pw",
   });
-  const contexts = createBrowserContexts(config.cacheDir);
-  const thanks = createThanks(config, contexts);
+  const thanks = createThanks(config);
 
   t.after(async () => {
-    await thanks.closeAll();
     await tracker.close();
     await qbit.close();
     rmSync(tmpDir, { recursive: true, force: true });
@@ -96,7 +92,6 @@ void test("operator config drives the full grab → thanks flow", async (t) => {
     assert.ok(site, "expected site keyed by configured id");
     assert.equal(site.id, "fake-site");
     assert.equal(site.baseUrl, tracker.baseUrl);
-    assert.equal(site.loginButtonSelector, 'button[type="submit"]');
   });
 
   await t.test("identifies the Site from a qBittorrent comment", async () => {
@@ -111,7 +106,6 @@ void test("operator config drives the full grab → thanks flow", async (t) => {
         return Promise.resolve({ status: "skipped", reason: "no_button" });
       },
       drainAll: () => Promise.resolve(),
-      closeAll: () => Promise.resolve(),
     });
     await thankTorrent(torrentHash);
 
@@ -164,41 +158,12 @@ void test("operator config drives the full grab → thanks flow", async (t) => {
       "the second torrent must be thanked exactly once",
     );
   });
-
-  // Regression: a renderer killed mid-scan (the container's memory ceiling is
-  // how it happens in production) used to poison every later torrent, because
-  // the crashed page stayed cached and Playwright cannot revive one. Every
-  // navigation after it failed with "Page crashed" until the process restarted.
-  await t.test("a crashed page does not poison the next torrent", async () => {
-    const sites = config.sites;
-    const site = sites.get("fake-site");
-    assert.ok(site, "expected configured site");
-
-    await enqueue("fake-site", async () => {
-      const page = await contexts.freshPage("fake-site");
-      // chrome://crash kills the renderer exactly like the OOM killer does.
-      await page.goto("chrome://crash").catch(() => {});
-    });
-
-    const thirdTorrentId = "24680";
-    const clicksBefore = tracker.clicks.length;
-    await thanks.thank({ site, torrentId: thirdTorrentId });
-
-    assertThanked(
-      tracker.clicks,
-      clicksBefore,
-      [thirdTorrentId],
-      "the torrent after a crash must still be thanked",
-    );
-    assert.equal(tracker.logins.length, 1, "recovering must not require a re-login");
-  });
 });
 
-// The HTTP engine performs the same Thanks without a renderer: it posts to the
-// Engine's Livewire endpoint directly. Both Livewire generations are in
+// The Thanks posts to the Engine's Livewire endpoint directly. Both Livewire generations are in
 // production use, and their payloads differ, so both are covered here.
 for (const livewire of [2, 3] as const) {
-  void test(`http engine thanks over livewire ${livewire}`, async (t) => {
+  void test(`thanks over livewire ${livewire}`, async (t) => {
     const tracker = await startFakeTracker({
       validCredentials: { username: "operator-user", password: "operator-pw" },
       livewire,
@@ -217,7 +182,6 @@ for (const livewire of [2, 3] as const) {
     const config = loadConfig({
       SITES_CONFIG_PATH: sitesPath,
       CACHE_DIR: join(tmpDir, "cache"),
-      THANKS_ENGINE: "http",
       [`${base}_USERNAME`]: "operator-user",
       [`${base}_PASSWORD`]: "operator-pw",
     });
@@ -231,7 +195,7 @@ for (const livewire of [2, 3] as const) {
     const site = config.sites.get(siteId);
     assert.ok(site, "expected configured site");
 
-    await t.test("logs in and thanks without a browser", async () => {
+    await t.test("logs in and thanks", async () => {
       const clicksBefore = tracker.clicks.length;
       const thankedBefore = await metricValue("tracker_torrents_thanked_total", { site: siteId });
       await thanks.thank({ site, torrentId: "9876" });
@@ -352,15 +316,14 @@ for (const livewire of [2, 3] as const) {
   });
 }
 
-/** One Site in sites.json, its credentials in env, and the engine under test. */
+/** One Site in sites.json and its credentials in env. */
 function configureSite(
   t: TestContext,
   {
     siteId,
     baseUrl,
-    engine,
     password = "operator-pw",
-  }: { siteId: string; baseUrl: string; engine: "browser" | "http"; password?: string },
+  }: { siteId: string; baseUrl: string; password?: string },
 ): { site: Site; thanks: Thanks } {
   const tmpDir = mkdtempSync(join(tmpdir(), "thanks-bot-e2e-"));
   const sitesPath = join(tmpDir, "sites.json");
@@ -370,7 +333,6 @@ function configureSite(
   const config = loadConfig({
     SITES_CONFIG_PATH: sitesPath,
     CACHE_DIR: join(tmpDir, "cache"),
-    THANKS_ENGINE: engine,
     [`${base}_USERNAME`]: "operator-user",
     [`${base}_PASSWORD`]: password,
   });
@@ -387,84 +349,40 @@ function configureSite(
 // Wrong credentials are how a Site answers after the Operator rotates a
 // password, and the bot must say so: silently carrying on would thank nothing
 // night after night while every metric stayed clean.
-for (const engine of ["http", "browser"] as const) {
-  void test(`the ${engine} engine surfaces a login the Site refused`, async (t) => {
-    const tracker = await startFakeTracker({
-      validCredentials: { username: "operator-user", password: "operator-pw" },
-    });
-    const { site, thanks } = configureSite(t, {
-      siteId: `bad-login-${engine}`,
-      baseUrl: tracker.baseUrl,
-      engine,
-      password: "the-wrong-password",
-    });
-
-    t.after(async () => {
-      await thanks.closeAll();
-      await tracker.close();
-    });
-
-    const failuresBefore = await metricValue("tracker_logins_total", {
-      site: site.id,
-      status: "failure",
-    });
-
-    await assert.rejects(
-      () => thanks.thank({ site, torrentId: "9876" }),
-      (err: unknown) =>
-        err instanceof LoginFailedError &&
-        err.site.id === site.id &&
-        err.message.includes(`${site.id.toUpperCase().replaceAll("-", "_")}_USERNAME`),
-      "the Operator has to be told which credentials to check",
-    );
-
-    assert.equal(tracker.clicks.length, 0, "nothing may be thanked without a session");
-    assert.deepEqual(tracker.logins, [{ username: "operator-user", ok: false }]);
-    assert.equal(
-      (await metricValue("tracker_logins_total", { site: site.id, status: "failure" })) -
-        failuresBefore,
-      1,
-      "a refused login must be counted as one",
-    );
-  });
-}
-
-// On a Livewire 2 Site the button comes back disabled once thanked. Clicking it
-// anyway is not a no-op: Playwright waits for it to become actionable and the
-// thank hangs until it times out.
-void test("the browser engine skips a torrent the Site shows as already thanked", async (t) => {
+void test("a login the Site refused is surfaced", async (t) => {
   const tracker = await startFakeTracker({
     validCredentials: { username: "operator-user", password: "operator-pw" },
-    livewire: 2,
   });
   const { site, thanks } = configureSite(t, {
-    siteId: "browser-duplicate",
+    siteId: "bad-login",
     baseUrl: tracker.baseUrl,
-    engine: "browser",
+    password: "the-wrong-password",
   });
 
   t.after(async () => {
-    await thanks.closeAll();
     await tracker.close();
   });
 
-  await thanks.thank({ site, torrentId: "9876" });
-  assert.equal(tracker.clicks.length, 1, "the first thanks must reach the Site");
-
-  const skippedBefore = await metricValue("tracker_torrents_skipped_total", {
+  const failuresBefore = await metricValue("tracker_logins_total", {
     site: site.id,
-    reason: "already_thanked",
+    status: "failure",
   });
 
-  await thanks.thank({ site, torrentId: "9876" });
+  await assert.rejects(
+    () => thanks.thank({ site, torrentId: "9876" }),
+    (err: unknown) =>
+      err instanceof LoginFailedError &&
+      err.site.id === site.id &&
+      err.message.includes(`${site.id.toUpperCase().replaceAll("-", "_")}_USERNAME`),
+    "the Operator has to be told which credentials to check",
+  );
 
-  assert.equal(tracker.clicks.length, 1, "a disabled button must not be clicked again");
+  assert.equal(tracker.clicks.length, 0, "nothing may be thanked without a session");
+  assert.deepEqual(tracker.logins, [{ username: "operator-user", ok: false }]);
   assert.equal(
-    (await metricValue("tracker_torrents_skipped_total", {
-      site: site.id,
-      reason: "already_thanked",
-    })) - skippedBefore,
+    (await metricValue("tracker_logins_total", { site: site.id, status: "failure" })) -
+      failuresBefore,
     1,
-    "the skip must name the reason the Operator would look for",
+    "a refused login must be counted as one",
   );
 });

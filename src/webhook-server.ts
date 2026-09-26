@@ -148,8 +148,6 @@ async function gracefulShutdown(signal: string, server: Server, thanks: Thanks):
     await new Promise<void>((resolve) => server.close(() => resolve()));
     log(PREFIX, "HTTP server closed. Draining in-flight thank tasks...");
     await thanks.drainAll();
-    log(PREFIX, "Tasks drained. Closing browser contexts...");
-    await thanks.closeAll();
     log(PREFIX, "Shutdown complete.");
     process.exit(0);
   } catch (err) {
