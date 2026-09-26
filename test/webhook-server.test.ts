@@ -31,7 +31,6 @@ async function startBot(
   const config = loadConfig({
     SITES_CONFIG_PATH: sitesPath,
     CACHE_DIR: join(tmpDir, "cache"),
-    THANKS_ENGINE: "http",
     [`${envVarBase(siteId)}_USERNAME`]: "operator-user",
     [`${envVarBase(siteId)}_PASSWORD`]: "operator-pw",
     QBIT_URL: qbit.baseUrl,
@@ -55,7 +54,6 @@ async function startBot(
 
   t.after(async () => {
     await new Promise<void>((resolve) => server.close(() => resolve()));
-    await thanks.closeAll();
     await qbit.close();
     rmSync(tmpDir, { recursive: true, force: true });
   });

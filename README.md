@@ -2,8 +2,7 @@
 
 Auto-thanks bot for private trackers, driven by Radarr/Sonarr webhooks and a
 daily scan of qBittorrent. When a new torrent is grabbed, the bot logs into
-the tracker site with Playwright and clicks the "thanks" button on the
-torrent page.
+the tracker site and calls its "thanks" button over HTTP, without a browser.
 
 ## Features
 
@@ -12,10 +11,10 @@ torrent page.
   the upload.
 - **Daily scan**: at a configurable hour, walks every torrent in qBittorrent
   and thanks any that haven't been thanked yet.
-- **Per-site session reuse**: one persistent Playwright context per tracker,
-  so login happens once and stays cached on disk.
+- **Per-site session reuse**: one cookie jar per tracker, so login happens
+  once and stays cached on disk.
 - **Per-site serial queue**: concurrent webhook bursts are serialized per
-  tracker so the browser context isn't torn while a click is in flight.
+  tracker so two grabs never log in at once.
 - **Prometheus metrics** on `/metrics`.
 - **Graceful shutdown**: in-flight thank tasks finish before exit (30 s
   timeout).
@@ -43,8 +42,7 @@ All configuration is via environment variables. See [.env.example](.env.example)
 | `<ID>_USERNAME`     | per site               | —                                                                  | Tracker username, where `<ID>` is the Site id from `sites.json` uppercased with `-` replaced by `_` (see [Sites](#sites)).                             |
 | `<ID>_PASSWORD`     | per site               | —                                                                  | Tracker password (same convention as above).                                                                                                           |
 | `SITES_CONFIG_PATH` | no                     | `./config/sites.json` (source) / `/app/config/sites.json` (Docker) | Path to the Sites config file.                                                                                                                         |
-| `CACHE_DIR`         | no                     | `./.cache`                                                         | Where session data is stored (Playwright profile, or the HTTP engine's cookie jar).                                                                    |
-| `THANKS_ENGINE`     | no                     | `browser`                                                          | How the Thanks is performed: `browser` drives Playwright, `http` calls the tracker's Livewire endpoint directly (no renderer, no Chromium memory).     |
+| `CACHE_DIR`         | no                     | `./.cache`                                                         | Where each Site's session cookies are stored.                                                                                                          |
 | `SCAN_ENABLED`      | no                     | `true`                                                             | Run the daily scan. Set to `false` to disable.                                                                                                         |
 | `SCAN_HOUR`         | no                     | `3`                                                                | Hour (0–23) at which the daily scan runs. An out-of-range value aborts startup.                                                                        |
 | `SCAN_ON_START`     | no                     | `false`                                                            | Run a scan immediately on startup.                                                                                                                     |
@@ -62,18 +60,16 @@ The Sites the bot operates on are defined in an operator-supplied
   "sites": [
     {
       "id": "example",
-      "base_url": "https://tracker.example.com",
-      "login_button_selector": "button[type=\"submit\"]"
+      "base_url": "https://tracker.example.com"
     }
   ]
 }
 ```
 
-| Field                   | Required | Default                 | Notes                                                                                                                                                                                                                                          |
-| ----------------------- | -------- | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `id`                    | yes      | —                       | Must match `^[a-z][a-z0-9-]{0,31}$`. Cannot be a reserved word (`serve`, `scan`, `help`, `version`, `init`, `list`, `add`, `remove`, `login`, `test`). Used as cache directory name, metrics label, log prefix, and credential env var prefix. |
-| `base_url`              | yes      | —                       | Full URL of the Site. Normalized at load (host lowercased, trailing slash stripped). Two Sites cannot share the same normalized `base_url`.                                                                                                    |
-| `login_button_selector` | no       | `button[type="submit"]` | CSS selector for the form submit button on the login page.                                                                                                                                                                                     |
+| Field      | Required | Default | Notes                                                                                                                                                                                                                                          |
+| ---------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`       | yes      | —       | Must match `^[a-z][a-z0-9-]{0,31}$`. Cannot be a reserved word (`serve`, `scan`, `help`, `version`, `init`, `list`, `add`, `remove`, `login`, `test`). Used as cache directory name, metrics label, log prefix, and credential env var prefix. |
+| `base_url` | yes      | —       | Full URL of the Site. Normalized at load (host lowercased, trailing slash stripped). Two Sites cannot share the same normalized `base_url`.                                                                                                    |
 
 ### File location
 
@@ -137,6 +133,9 @@ Run a one-shot scan and exit:
 ```sh
 node dist/index.js scan
 ```
+
+In Docker, run these one-off commands with `docker run --init`: only `serve`
+handles `SIGTERM` and `SIGINT` itself.
 
 ## Radarr / Sonarr setup
 

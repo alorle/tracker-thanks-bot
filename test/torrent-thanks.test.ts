@@ -7,7 +7,6 @@ import type { ThankTarget, Thanks, ThanksOutcome } from "../src/thank.ts";
 const site = (id: string, baseUrl: string): Site => ({
   id,
   baseUrl,
-  loginButtonSelector: 'button[type="submit"]',
   username: "operator-user",
   password: "operator-pw",
 });
@@ -42,7 +41,6 @@ function wire(
       return Promise.resolve(outcome);
     },
     drainAll: () => Promise.resolve(),
-    closeAll: () => Promise.resolve(),
   };
 
   return { thankTorrent: createTorrentThanks(sites, qbClient, thanks), recorded };

@@ -1,7 +1,6 @@
 import { envVarBase, type Config, type Site } from "./config.ts";
 import { classifyRejection, type ClassifyRejection } from "./rejection.ts";
-import { createBrowserContexts, enqueue, drainAll, type BrowserContexts } from "./browser.ts";
-import { createBrowserThanks } from "./browser-thanks.ts";
+import { enqueue, drainAll } from "./queue.ts";
 import { createHttpThanks } from "./http-thanks.ts";
 import { log } from "./log.ts";
 import { torrentsThanked, torrentsSkipped, torrentsErrored, thankDuration } from "./metrics.ts";
@@ -86,30 +85,29 @@ function record(outcome: ThanksOutcome, site: Site, torrentId: string, logPrefix
 export type Thanks = {
   thank: (target: ThankTarget) => Promise<ThanksOutcome>;
   drainAll: () => Promise<void>;
-  closeAll: () => Promise<void>;
 };
 
 export function createThanks(
   config: Config,
-  contexts: BrowserContexts = createBrowserContexts(config.cacheDir),
   classify: ClassifyRejection = classifyRejection,
 ): Thanks {
-  const thankOverBrowser = createBrowserThanks(contexts);
   const thankOverHttp = createHttpThanks(config.cacheDir);
 
   /**
    * Thank one torrent, serialized per Site.
    *
-   * The queue is what keeps two grabs on the same Site from logging in at once,
-   * whichever engine is active.
+   * The queue is what keeps two grabs on the same Site from logging in at once.
    */
   function thank({ site, torrentId }: ThankTarget): Promise<ThanksOutcome> {
     const logPrefix = `auto-thanks:${site.id}`;
     return enqueue(site.id, async () => {
-      const engine = config.thanksEngine === "http" ? thankOverHttp : thankOverBrowser;
       const stopTimer = thankDuration.startTimer({ site: site.id });
       try {
-        const outcome = await place(await engine(torrentId, site, logPrefix), classify, torrentId);
+        const outcome = await place(
+          await thankOverHttp(torrentId, site, logPrefix),
+          classify,
+          torrentId,
+        );
         record(outcome, site, torrentId, logPrefix);
         return outcome;
       } catch (err) {
@@ -121,5 +119,5 @@ export function createThanks(
     });
   }
 
-  return { thank, drainAll, closeAll: contexts.closeAll };
+  return { thank, drainAll };
 }
