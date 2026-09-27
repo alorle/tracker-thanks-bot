@@ -1,6 +1,7 @@
 import { loadConfig, envVarBase, type Config, type SitesMap } from "./config.ts";
 import { log } from "./log.ts";
-import { createThanks, LoginFailedError, type Thanks } from "./thank.ts";
+import { createThanks, type Thanks } from "./thank.ts";
+import { LoginFailedError } from "./http-thanks.ts";
 import { startServer } from "./webhook-server.ts";
 import { QBittorrentClient } from "./qbittorrent.ts";
 import { scanAllTorrents } from "./scanner.ts";

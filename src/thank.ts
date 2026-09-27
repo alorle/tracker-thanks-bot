@@ -1,7 +1,7 @@
-import { envVarBase, type Config, type Site } from "./config.ts";
+import type { Config, Site } from "./config.ts";
 import { classifyRejection, type ClassifyRejection } from "./rejection.ts";
 import { enqueue, drainAll } from "./queue.ts";
-import { createHttpThanks } from "./http-thanks.ts";
+import { createHttpThanks, type ThanksAnswer } from "./http-thanks.ts";
 import { log } from "./log.ts";
 import { torrentsThanked, torrentsSkipped, torrentsErrored, thankDuration } from "./metrics.ts";
 
@@ -10,36 +10,12 @@ export type ThankTarget = {
   torrentId: string;
 };
 
-export class LoginFailedError extends Error {
-  readonly site: Site;
-
-  constructor(site: Site) {
-    const base = envVarBase(site.id);
-    super(`Login failed. Check your ${base}_USERNAME and ${base}_PASSWORD.`);
-    this.name = "LoginFailedError";
-    this.site = site;
-  }
-}
-
-export class ThanksRefusedAsInvalidError extends Error {
-  constructor(torrentId: string, message: string) {
-    super(`The Site turned down the thanks call for torrent ${torrentId} as invalid: ${message}`);
-    this.name = "ThanksRefusedAsInvalidError";
-  }
-}
-
 export type SkipReason =
   "no_button" | "already_thanked" | "quota_exhausted" | "not_eligible" | "rejected";
 
 export type ThanksOutcome =
   | { status: "thanked"; detail: string }
   | { status: "skipped"; reason: SkipReason; message?: string };
-
-export type ThanksAdapter = (
-  torrentId: string,
-  site: Site,
-  logPrefix: string,
-) => Promise<ThanksOutcome>;
 
 function skipMessage(outcome: { reason: SkipReason; message?: string }, torrentId: string): string {
   if (outcome.reason === "no_button") {
@@ -58,18 +34,15 @@ function skipMessage(outcome: { reason: SkipReason; message?: string }, torrentI
   return `Site rejected thanks for torrent ${torrentId}: ${detail}`;
 }
 
-async function place(
-  outcome: ThanksOutcome,
-  classify: ClassifyRejection,
-  torrentId: string,
-): Promise<ThanksOutcome> {
-  if (outcome.status !== "skipped" || outcome.reason !== "rejected") return outcome;
+async function place(answer: ThanksAnswer, classify: ClassifyRejection): Promise<ThanksOutcome> {
+  if (answer.status !== "refused") return answer;
 
-  const message = outcome.message ?? "";
-  const reason = await classify(message);
-  if (reason === "protocol_error") throw new ThanksRefusedAsInvalidError(torrentId, message);
-  if (reason === "other") return outcome;
-  return { ...outcome, reason };
+  const reason = await classify(answer.message);
+  return {
+    status: "skipped",
+    reason: reason === "other" ? "rejected" : reason,
+    message: answer.message,
+  };
 }
 
 function record(outcome: ThanksOutcome, site: Site, torrentId: string, logPrefix: string): void {
@@ -103,11 +76,7 @@ export function createThanks(
     return enqueue(site.id, async () => {
       const stopTimer = thankDuration.startTimer({ site: site.id });
       try {
-        const outcome = await place(
-          await thankOverHttp(torrentId, site, logPrefix),
-          classify,
-          torrentId,
-        );
+        const outcome = await place(await thankOverHttp(torrentId, site, logPrefix), classify);
         record(outcome, site, torrentId, logPrefix);
         return outcome;
       } catch (err) {

@@ -4,7 +4,8 @@ import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig, type Config, type Site } from "../src/config.ts";
-import { createThanks, ThanksRefusedAsInvalidError } from "../src/thank.ts";
+import { createThanks } from "../src/thank.ts";
+import { ThanksRefusedAsInvalidError } from "../src/http-thanks.ts";
 import { startFakeTracker } from "./fake-tracker.ts";
 import { histogramCount, metricValue } from "./metric-probe.ts";
 
@@ -51,11 +52,12 @@ void test("a Thanks that blows up is counted and timed against its Site", async 
   );
 });
 
-async function refusingSite(t: TestContext, id: string, torrentId: string) {
+async function refusingSite(t: TestContext, id: string, torrentId: string, refusal?: string) {
   const tracker = await startFakeTracker({
     validCredentials: { username: "operator-user", password: "operator-pw" },
     livewire: 3,
     rejects: [torrentId],
+    refusal,
   });
   t.after(() => tracker.close());
   return configuredSite(t, id, tracker.baseUrl);
@@ -87,15 +89,24 @@ void test("a refusal the classifier places is recorded under that reason", async
   );
 });
 
-void test("a refusal aimed at our own payload is an error, not a skip", async (t) => {
-  const { config, site } = await refusingSite(t, "bad-payload", "9876");
+void test("Livewire turning down our own payload is an error, not a skip", async (t) => {
+  const { config, site } = await refusingSite(
+    t,
+    "bad-payload",
+    "9876",
+    "Component payload was altered!",
+  );
   const erroredBefore = await metricValue("tracker_torrents_errored_total", { site: site.id });
   const skippedBefore = await metricValue("tracker_torrents_skipped_total", {
     site: site.id,
     reason: "rejected",
   });
 
-  const thanks = createThanks(config, () => Promise.resolve("protocol_error"));
+  const asked: string[] = [];
+  const thanks = createThanks(config, (message) => {
+    asked.push(message);
+    return Promise.resolve("other");
+  });
 
   await assert.rejects(
     () => thanks.thank({ site, torrentId: "9876" }),
@@ -114,6 +125,7 @@ void test("a refusal aimed at our own payload is an error, not a skip", async (t
     0,
     "it must not also be counted as a skip",
   );
+  assert.deepEqual(asked, [], "Livewire's own words are not the Site's, so nothing places them");
 });
 
 void test("only a refusal reaches the classifier, and with the Site's own words", async (t) => {
