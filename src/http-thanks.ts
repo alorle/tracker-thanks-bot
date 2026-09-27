@@ -1,15 +1,38 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import type { Site } from "./config.ts";
-import { LoginFailedError, type ThanksAdapter } from "./thank.ts";
+import { envVarBase, type Site } from "./config.ts";
 import { log } from "./log.ts";
 import { logins } from "./metrics.ts";
 
 const REQUEST_TIMEOUT_MS = 30_000;
 const MAX_REDIRECTS = 10;
 const THANK_COMPONENT = "thank-button";
+const LIVEWIRE_PROTOCOL_ERRORS = [/component payload was altered/i, /wrong component/i];
 const USER_AGENT =
   "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36";
+
+export class LoginFailedError extends Error {
+  readonly site: Site;
+
+  constructor(site: Site) {
+    const base = envVarBase(site.id);
+    super(`Login failed. Check your ${base}_USERNAME and ${base}_PASSWORD.`);
+    this.name = "LoginFailedError";
+    this.site = site;
+  }
+}
+
+export class ThanksRefusedAsInvalidError extends Error {
+  constructor(torrentId: string, message: string) {
+    super(`The Site turned down the thanks call for torrent ${torrentId} as invalid: ${message}`);
+    this.name = "ThanksRefusedAsInvalidError";
+  }
+}
+
+export type ThanksAnswer =
+  | { status: "thanked"; detail: string }
+  | { status: "skipped"; reason: "no_button" | "already_thanked" }
+  | { status: "refused"; message: string };
 
 type Jar = Map<string, string>;
 type RequestInit = {
@@ -186,7 +209,7 @@ async function login(jar: Jar, site: Site, logPrefix: string): Promise<void> {
   log(logPrefix, "Login successful.");
 }
 
-/** Invoke the component's `store()`. Returns the Site's rejection, if any. */
+/** Invoke the component's `store()`. Returns the Site's Refusal, if any. */
 async function callStore(
   jar: Jar,
   site: Site,
@@ -254,12 +277,18 @@ async function callStore(
 
   for (const dispatch of effects?.dispatches ?? []) {
     if ((dispatch.name ?? dispatch.event) !== "error") continue;
-    return (dispatch.params ?? dispatch.data)?.message ?? "unknown error";
+    const message = (dispatch.params ?? dispatch.data)?.message ?? "unknown error";
+    if (LIVEWIRE_PROTOCOL_ERRORS.some((pattern) => pattern.test(message))) {
+      throw new ThanksRefusedAsInvalidError(torrentId, message);
+    }
+    return message;
   }
   return null;
 }
 
-export function createHttpThanks(cacheDir: string): ThanksAdapter {
+export function createHttpThanks(
+  cacheDir: string,
+): (torrentId: string, site: Site, logPrefix: string) => Promise<ThanksAnswer> {
   const jars = new Map<string, Jar>();
 
   function jarPath(siteKey: string): string {
@@ -320,9 +349,9 @@ export function createHttpThanks(cacheDir: string): ThanksAdapter {
         throw new Error("No csrf-token meta tag on the torrent page.");
       }
 
-      const rejection = await callStore(jar, site, button, torrentId, csrfToken, url);
-      if (rejection) {
-        return { status: "skipped", reason: "rejected", message: rejection };
+      const refusal = await callStore(jar, site, button, torrentId, csrfToken, url);
+      if (refusal) {
+        return { status: "refused", message: refusal };
       }
 
       return { status: "thanked", detail: `livewire v${button.livewire}` };

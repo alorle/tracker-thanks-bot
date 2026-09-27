@@ -23,12 +23,14 @@ export function startFakeTracker({
   validCredentials,
   livewire = 3,
   rejects = [],
+  refusal = "No puedes agradecer este torrent.",
 }: {
   validCredentials?: { username: string; password: string };
   /** Which Livewire generation the Engine runs. Both are in production use. */
   livewire?: 2 | 3;
   /** Torrents the Site turns down even though it renders the button enabled. */
   rejects?: string[];
+  refusal?: string;
 } = {}): Promise<FakeTracker> {
   const creds = validCredentials ?? { username: "user", password: "pw" };
   const refused = new Set(rejects);
@@ -233,7 +235,7 @@ export function startFakeTracker({
           return;
         }
         if (refused.has(torrentId)) {
-          res.end(JSON.stringify(dispatch("error", "No puedes agradecer este torrent.")));
+          res.end(JSON.stringify(dispatch("error", refusal)));
           return;
         }
         if (thanked.has(torrentId)) {

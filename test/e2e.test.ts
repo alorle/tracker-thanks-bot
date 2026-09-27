@@ -11,7 +11,8 @@ import { metricValue } from "./metric-probe.ts";
 import { loadConfig } from "../src/config.ts";
 import { createTorrentThanks } from "../src/torrent-thanks.ts";
 import { QBittorrentClient } from "../src/qbittorrent.ts";
-import { createThanks, LoginFailedError } from "../src/thank.ts";
+import { createThanks } from "../src/thank.ts";
+import { LoginFailedError } from "../src/http-thanks.ts";
 
 // Assert what a step added to the Site's click log rather than the running
 // total: a total makes every later step fail once an earlier one does, and
