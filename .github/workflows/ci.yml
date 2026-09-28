@@ -18,6 +18,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
+      - name: Check Node matches the Docker image
+        run: |
+          if grep '^FROM node:' Dockerfile | grep -v "node:$(cat .node-version)-"; then
+            echo "::error file=Dockerfile::Every FROM node: must use the version in .node-version ($(cat .node-version))"
+            exit 1
+          fi
+
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
