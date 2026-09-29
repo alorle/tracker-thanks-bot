@@ -3,7 +3,7 @@
   "version": "1.2.0",
   "type": "module",
   "engines": {
-    "node": ">=26.8.1"
+    "node": ">=26.10.0"
   },
   "scripts": {
     "build": "tsc -b tsconfig.app.json",
