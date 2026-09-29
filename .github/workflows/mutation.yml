@@ -41,6 +41,35 @@ jobs:
       - name: Run Stryker
         run: npm run test:mutation -- ${{ github.event_name == 'pull_request' && '--incremental' || '' }}
 
+      - name: Summarise the mutation score
+        if: always() && hashFiles('reports/mutation/mutation.json') != ''
+        run: |
+          node --input-type=module -e '
+          import { readFileSync, appendFileSync } from "node:fs";
+          const report = JSON.parse(readFileSync("reports/mutation/mutation.json", "utf8"));
+          const score = (mutants) => {
+            const count = (...statuses) => mutants.filter((m) => statuses.includes(m.status)).length;
+            const detected = count("Killed", "Timeout");
+            const valid = detected + count("Survived", "NoCoverage");
+            return { text: valid ? `${((detected / valid) * 100).toFixed(2)}%` : "n/a", survived: count("Survived", "NoCoverage") };
+          };
+          const files = Object.entries(report.files);
+          const total = score(files.flatMap(([, file]) => file.mutants));
+          const rows = files.map(([path, file]) => {
+            const s = score(file.mutants);
+            return `| \`${path}\` | ${s.text} | ${s.survived} |`;
+          });
+          appendFileSync(process.env.GITHUB_STEP_SUMMARY, [
+            "### Mutation testing",
+            "",
+            `Score **${total.text}** (break at ${report.thresholds.break}%), ${total.survived} mutants survived. Full report in the \`mutation-report\` artifact.`,
+            "",
+            "| File | Score | Survived |",
+            "| --- | --- | --- |",
+            ...rows,
+          ].join("\n") + "\n");
+          '
+
       - name: Upload the mutation report
         if: always()
         uses: actions/upload-artifact@v7
