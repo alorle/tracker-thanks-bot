@@ -54,12 +54,6 @@ comment in qBittorrent, which names the Site's URL and that id — matching it
 against the configured Sites is what turns a hash into a **Thanks**.
 _Avoid_: release, download, grab (the webhook event, not the thing it names)
 
-## Flagged ambiguities
-
-- **"Site identifier"**: historically there were three names per Site (map key,
-  envPrefix, name). Consolidated to a single `id` field — if you see code or
-  docs still referring to `envPrefix` or `name`, treat it as legacy.
-
 ## Example dialogue
 
 > **Dev**: When a Radarr Grab webhook comes in, how do we know which Site to
