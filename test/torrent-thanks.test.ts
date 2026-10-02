@@ -128,3 +128,15 @@ void test("the verdict the Site gave comes back with the result", async () => {
     "the scan tallies this verdict, so it must not be flattened into a success",
   );
 });
+
+void test("a Site the caller has paused comes back paused with its target, untouched", async () => {
+  const { thankTorrent, recorded } = wire("https://a.example.com/torrents/1");
+
+  const result = await thankTorrent("abc123", { skipSite: (paused) => paused.id === "alpha" });
+
+  assert.deepEqual(result, {
+    status: "site_paused",
+    target: { site: sites.get("alpha"), torrentId: "1" },
+  });
+  assert.deepEqual(recorded.thanked, []);
+});

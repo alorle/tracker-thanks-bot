@@ -6,12 +6,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startFakeQBittorrent, type FakeTorrent } from "./fake-qbittorrent.ts";
 import { startFakeTracker } from "./fake-tracker.ts";
-import { metricValue } from "./metric-probe.ts";
+import { histogramCount, metricValue } from "./metric-probe.ts";
 import { envVarBase, loadConfig } from "../src/config.ts";
 import { createThanks } from "../src/thank.ts";
 import { QBittorrentClient } from "../src/qbittorrent.ts";
 import { startServer } from "../src/webhook-server.ts";
-import { createTorrentThanks } from "../src/torrent-thanks.ts";
+import {
+  createTorrentThanks,
+  type TorrentThanks,
+  type TorrentThanksResult,
+} from "../src/torrent-thanks.ts";
 
 async function startBot(
   t: TestContext,
@@ -186,6 +190,7 @@ void test("a Grab is refused unless it carries the configured secret", async (t)
   for (const [what, headers] of refused) {
     const response = await post(headers);
     assert.equal(response.status, 401, `expected ${what} to be rejected`);
+    assert.deepEqual(await response.json(), { error: "Unauthorized." });
   }
 
   const accepted = await post({ "x-webhook-secret": "s3cr3t-value" });
@@ -293,4 +298,133 @@ void test("a body of exactly the maximum size is still served", async (t) => {
     body,
   });
   assert.equal(response.status, 200);
+});
+
+async function serve(
+  t: TestContext,
+  thankTorrent: TorrentThanks = () => Promise.resolve({ status: "no_comment" }),
+): Promise<string> {
+  const server = await startServer({ port: 0, secret: null }, thankTorrent, {
+    thank: () => Promise.reject(new Error("the webhook never thanks directly")),
+    drainAll: () => Promise.resolve(),
+  });
+  t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
+  const address = server.address();
+  return `http://127.0.0.1:${typeof address === "object" && address ? address.port : 0}`;
+}
+
+const postJson = (url: string, body: string): Promise<Response> =>
+  fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body });
+
+void test("a body that is not JSON is answered with a 400", async (t) => {
+  const base = await serve(t);
+
+  const response = await postJson(`${base}/webhook/radarr`, "{ not json");
+
+  assert.equal(response.status, 400);
+  assert.equal(response.headers.get("content-type"), "application/json");
+  assert.deepEqual(await response.json(), { error: "Invalid JSON body." });
+});
+
+void test("an event other than a Grab is acknowledged, ignored and counted", async (t) => {
+  const base = await serve(t);
+  const unnamed = () =>
+    metricValue("tracker_webhooks_received_total", { source: "sonarr", event_type: "unknown" });
+  const before = await unnamed();
+
+  const response = await postJson(`${base}/webhook/sonarr`, JSON.stringify({ eventType: "Test" }));
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), {
+    status: "ignored",
+    reason: 'Event type "Test" is not "Grab".',
+  });
+
+  await postJson(`${base}/webhook/sonarr`, JSON.stringify({}));
+  assert.equal((await unnamed()) - before, 1, "an event with no type is counted as unknown");
+});
+
+void test("a Grab naming no download is answered with a 400", async (t) => {
+  const base = await serve(t);
+
+  const response = await postJson(`${base}/webhook/radarr`, JSON.stringify({ eventType: "Grab" }));
+
+  assert.equal(response.status, 400);
+  assert.deepEqual(await response.json(), { error: "No downloadId found in payload." });
+});
+
+void test("a Grab carrying no title is still accepted", async (t) => {
+  const base = await serve(t);
+
+  const response = await postJson(
+    `${base}/webhook/radarr`,
+    JSON.stringify({ eventType: "Grab", downloadId: "abc123" }),
+  );
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { status: "accepted", hash: "abc123" });
+});
+
+void test("each Grab is timed against the Site it reached, or unknown when none", async (t) => {
+  const site = {
+    id: "timed-site",
+    baseUrl: "https://timed.example.com",
+    username: "operator-user",
+    password: "operator-pw",
+  };
+  const results: Record<string, TorrentThanksResult> = {
+    empty: { status: "no_comment" },
+    elsewhere: { status: "no_site", comment: "https://elsewhere.example.com/torrents/1" },
+    matched: {
+      status: "thanked",
+      target: { site, torrentId: "1" },
+      outcome: { status: "thanked", detail: "clicked" },
+    },
+  };
+  const asked: { hash: string; waitForComment?: boolean }[] = [];
+  const base = await serve(t, (hash, options) => {
+    asked.push({ hash, waitForComment: options?.waitForComment });
+    return Promise.resolve(results[hash] ?? { status: "no_comment" });
+  });
+
+  const timed = (label: string) =>
+    histogramCount("tracker_webhook_processing_duration_seconds", {
+      source: "radarr",
+      site: label,
+    });
+  const before = { unknown: await timed("unknown"), site: await timed("timed-site") };
+
+  for (const hash of Object.keys(results)) {
+    await postJson(
+      `${base}/webhook/radarr`,
+      JSON.stringify({ eventType: "Grab", downloadId: hash }),
+    );
+  }
+  await waitFor(() => asked.length === 3, "every Grab must be handed over to be thanked");
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(
+    asked.map(({ waitForComment }) => waitForComment),
+    [true, true, true],
+    "a Grab arrives before qBittorrent has the comment, so it must wait for it",
+  );
+  assert.equal((await timed("unknown")) - before.unknown, 2);
+  assert.equal((await timed("timed-site")) - before.site, 1);
+});
+
+void test("each endpoint answers only its own method and path", async (t) => {
+  const base = await serve(t);
+
+  const health = await fetch(`${base}/health`);
+  assert.deepEqual(await health.json(), { status: "healthy" });
+
+  const strays: [string, string][] = [
+    ["POST", "/health"],
+    ["POST", "/metrics"],
+    ["GET", "/webhook/radarr"],
+    ["POST", "/webhook/lidarr"],
+  ];
+  for (const [method, path] of strays) {
+    const response = await fetch(`${base}${path}`, { method });
+    assert.equal(response.status, 404, `expected ${method} ${path} to be a 404`);
+  }
 });
