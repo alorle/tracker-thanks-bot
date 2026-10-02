@@ -24,6 +24,11 @@ export function startFakeTracker({
   livewire = 3,
   rejects = [],
   refusal = "No puedes agradecer este torrent.",
+  withoutButton = [],
+  answer,
+  redirects = 0,
+  forgetsSessions = false,
+  withoutCsrfToken = false,
 }: {
   validCredentials?: { username: string; password: string };
   /** Which Livewire generation the Engine runs. Both are in production use. */
@@ -31,6 +36,11 @@ export function startFakeTracker({
   /** Torrents the Site turns down even though it renders the button enabled. */
   rejects?: string[];
   refusal?: string;
+  withoutButton?: string[];
+  answer?: { status: number; headers?: Record<string, string>; body: string };
+  redirects?: number;
+  forgetsSessions?: boolean;
+  withoutCsrfToken?: boolean;
 } = {}): Promise<FakeTracker> {
   const creds = validCredentials ?? { username: "user", password: "pw" };
   const refused = new Set(rejects);
@@ -90,31 +100,37 @@ export function startFakeTracker({
 <html lang="es">
 <head>
   <meta charset="utf-8">
-  <meta name="csrf-token" content="${CSRF_TOKEN}">
+  ${withoutCsrfToken ? "" : `<meta name="csrf-token" content="${CSRF_TOKEN}">`}
   <title>Torrent ${torrentId}</title>
 </head>
 <body>
   <h1>Torrent ${torrentId}</h1>
   <button ${component("bookmark-button", torrentId)} wire:click="store(${torrentId})" disabled>Favorito</button>
-  <button ${component("thank-button", torrentId)} wire:click="store(${torrentId})"${
-    thanked.has(torrentId) && livewire === 2 ? " disabled" : ""
-  }>Agradecer</button>
+  ${
+    withoutButton.includes(torrentId)
+      ? ""
+      : `<button ${component("thank-button", torrentId)} wire:click="store(${torrentId})"${
+          thanked.has(torrentId) && livewire === 2 ? " disabled" : ""
+        }>Agradecer</button>`
+  }
 </body>
 </html>`;
 
   // Beyond the CSRF token the login form carries honeypot fields whose names
   // and values change on every render, so a client has to read the form before
   // posting it. Production does exactly this.
-  const loginPage = (formToken: string): string => `<!DOCTYPE html>
+  const loginFields = ["_token", "_username", "username", "password"];
+  const loginPage = (formToken: string, origin: string): string => `<!DOCTYPE html>
 <html lang="es">
 <head><meta charset="utf-8"><meta name="csrf-token" content="${CSRF_TOKEN}"><title>Login</title></head>
 <body>
-  <form method="post" action="/login">
+  <form method="get" action="${origin}/search"><input name="q" value="torrent" /></form>
+  <form method="post" action="${origin}/login">
     <input type="hidden" name="_token" value="${formToken}" />
-    <input type="hidden" name="_username" value="" />
+    <input type="hidden" name="_username" />
     <input name="username" />
     <input name="password" type="password" />
-    <button type="submit">Iniciar sesión</button>
+    <input type="submit" value="Iniciar sesión" />
   </form>
 </body>
 </html>`;
@@ -131,8 +147,13 @@ export function startFakeTracker({
   const server = createServer((req, res) => {
     const reqUrl = new URL(req.url ?? "/", "http://127.0.0.1");
     requests.push({ method: req.method ?? "", path: reqUrl.pathname });
-    const cookieHeader = req.headers.cookie ?? "";
-    const sid = /SID=([^;]+)/.exec(cookieHeader)?.[1];
+    const cookies = new Map(
+      (req.headers.cookie ?? "").split("; ").map((pair) => {
+        const separator = pair.indexOf("=");
+        return [pair.slice(0, separator), pair.slice(separator + 1)] as const;
+      }),
+    );
+    const sid = cookies.get("SID");
     const isAuthed = sid ? sessions.has(sid) : false;
 
     const html = (body: string): void => {
@@ -143,26 +164,35 @@ export function startFakeTracker({
     if (reqUrl.pathname === "/login" && req.method === "GET") {
       const formToken = "form-" + Math.random().toString(36).slice(2);
       issuedFormTokens.add(formToken);
-      html(loginPage(formToken));
+      html(loginPage(formToken, `http://${req.headers.host}`));
       return;
     }
 
     if (reqUrl.pathname === "/login" && req.method === "POST") {
       void readBody(req).then((body) => {
-        const params = new URLSearchParams(body);
+        const isForm = (req.headers["content-type"] ?? "").startsWith(
+          "application/x-www-form-urlencoded",
+        );
+        const params = new URLSearchParams(isForm ? body : "");
         const username = params.get("username") ?? "";
         const password = params.get("password") ?? "";
         // The hidden fields must come back exactly as they were served.
         const formOk =
-          issuedFormTokens.has(params.get("_token") ?? "") && params.get("_username") === "";
+          issuedFormTokens.has(params.get("_token") ?? "") &&
+          params.get("_username") === "" &&
+          [...params.keys()].every((name) => loginFields.includes(name));
         const ok = formOk && username === creds.username && password === creds.password;
         logins.push({ username, ok });
         if (ok) {
           const newSid = "sid-" + Math.random().toString(36).slice(2);
-          sessions.add(newSid);
+          if (!forgetsSessions) sessions.add(newSid);
           // The stray nameless cookie is real-world noise a jar must drop.
           res.writeHead(302, {
-            "Set-Cookie": [`SID=${newSid}; Path=/; HttpOnly`, "=orphan; Path=/"],
+            "Set-Cookie": [
+              `SID=${newSid}; Path=/; HttpOnly`,
+              "XSRF-TOKEN=fake-xsrf; Path=/",
+              "=orphan; Path=/",
+            ],
             Location: "/",
           });
         } else {
@@ -180,6 +210,12 @@ export function startFakeTracker({
         res.end();
         return;
       }
+      const hop = Number(reqUrl.searchParams.get("hop") ?? 0);
+      if (hop < redirects) {
+        res.writeHead(302, { Location: `${reqUrl.pathname}?hop=${hop + 1}` });
+        res.end();
+        return;
+      }
       html(torrentPage(torrentMatch[1]!));
       return;
     }
@@ -191,32 +227,54 @@ export function startFakeTracker({
 
     if (isLivewire) {
       // Laravel rejects a Livewire call that arrives without the page's token.
-      if (req.headers["x-csrf-token"] !== CSRF_TOKEN) {
+      if (
+        req.headers["x-csrf-token"] !== CSRF_TOKEN ||
+        req.headers["x-livewire"] !== "true" ||
+        req.headers["content-type"] !== "application/json"
+      ) {
         res.writeHead(419, { "Content-Type": "text/plain" });
         res.end("Page Expired");
         return;
       }
       void readBody(req).then((body) => {
+        if (answer) {
+          res.writeHead(answer.status, answer.headers);
+          res.end(answer.body);
+          return;
+        }
         const payload = JSON.parse(body) as {
           fingerprint?: { name?: string };
           serverMemo?: unknown;
-          updates?: { payload?: { params?: number[] } }[];
-          components?: { snapshot?: string; calls?: { params?: number[] }[] }[];
+          updates?: { type?: string; payload?: { method?: string; params?: number[] } }[];
+          components?: {
+            snapshot?: string;
+            calls?: { method?: string; params?: number[] }[];
+          }[];
         };
 
         let torrentId = "";
         let component = "thank-button";
+        let method = "";
         let signed = true;
         if (payload.components) {
           const raw = payload.components[0]?.snapshot ?? "{}";
           const snapshot = JSON.parse(raw) as { memo?: { name?: string } };
           component = snapshot.memo?.name ?? "";
+          method = payload.components[0]?.calls?.[0]?.method ?? "";
           torrentId = String(payload.components[0]?.calls?.[0]?.params?.[0]);
           signed = servedPayloads.has(raw);
         } else if (payload.fingerprint) {
+          const update = payload.updates?.[0];
           component = payload.fingerprint.name ?? "";
-          torrentId = String(payload.updates?.[0]?.payload?.params?.[0]);
+          method = update?.type === "callMethod" ? (update.payload?.method ?? "") : "";
+          torrentId = String(update?.payload?.params?.[0]);
           signed = servedPayloads.has(JSON.stringify(payload.serverMemo));
+        }
+
+        if (method !== "store") {
+          res.writeHead(500, { "Content-Type": "text/plain" });
+          res.end("Unable to call component method");
+          return;
         }
 
         // A real Site answers 200 whatever happens; the outcome is dispatched.

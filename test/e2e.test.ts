@@ -199,9 +199,20 @@ for (const livewire of [2, 3] as const) {
     await t.test("logs in and thanks", async () => {
       const clicksBefore = tracker.clicks.length;
       const thankedBefore = await metricValue("tracker_torrents_thanked_total", { site: siteId });
-      await thanks.thank({ site, torrentId: "9876" });
+      const loginsBefore = await metricValue("tracker_logins_total", {
+        site: siteId,
+        status: "success",
+      });
+      const outcome = await thanks.thank({ site, torrentId: "9876" });
 
+      assert.deepEqual(outcome, { status: "thanked", detail: `livewire v${livewire}` });
       assert.deepEqual(tracker.logins, [{ username: "operator-user", ok: true }]);
+      assert.equal(
+        (await metricValue("tracker_logins_total", { site: siteId, status: "success" })) -
+          loginsBefore,
+        1,
+        "a login the Site accepted must be counted as one",
+      );
       // The bookmark button is rendered first and carries the same wire:click;
       // the fake also refuses a call that does not name the thanks component,
       // so reaching here proves the right one was invoked.
@@ -248,7 +259,11 @@ for (const livewire of [2, 3] as const) {
       // The Site also serves a nameless cookie; storing it would send garbage
       // back on every later request.
       const stored = JSON.parse(readFileSync(cookies, "utf-8")) as Record<string, string>;
-      assert.deepEqual(Object.keys(stored), ["SID"], "only well-formed cookies belong in the jar");
+      assert.deepEqual(
+        Object.keys(stored),
+        ["SID", "XSRF-TOKEN"],
+        "only well-formed cookies belong in the jar",
+      );
     });
 
     // Livewire 2 disables the button once thanked; Livewire 3 renders it
@@ -265,8 +280,10 @@ for (const livewire of [2, 3] as const) {
         reason,
       });
 
-      await thanks.thank({ site, torrentId: "9876" });
+      const outcome = await thanks.thank({ site, torrentId: "9876" });
 
+      assert.equal(outcome.status, "skipped");
+      assert.equal(outcome.status === "skipped" ? outcome.reason : null, reason);
       assertThanked(
         tracker.clicks,
         clicksBefore,
