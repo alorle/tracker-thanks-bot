@@ -17,10 +17,10 @@ export default {
     // writes them, which is where the mutants belong.
     "!src/metrics.ts",
   ],
-  // Measured, not aspirational: the suite scores 65.34% today. `break` sits just
+  // Measured, not aspirational: the suite scores 90.80% today. `break` sits just
   // under it so the build fails on a regression, not on the log-message mutants
   // that make up most of what survives.
-  thresholds: { high: 80, low: 65, break: 63 },
+  thresholds: { high: 95, low: 90, break: 88 },
   incrementalFile: "reports/stryker-incremental.json",
   reporters: ["html", "json", "clear-text", "progress"],
   // A timeout counts as detected, so it must mean a hung mutant and never a
