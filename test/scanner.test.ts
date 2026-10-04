@@ -5,9 +5,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startFakeTracker } from "./fake-tracker.ts";
 import { startFakeQBittorrent } from "./fake-qbittorrent.ts";
-import { metricValue } from "./metric-probe.ts";
+import { histogramCount, metricValue } from "./metric-probe.ts";
 import { loadConfig, type Site, type SitesMap } from "../src/config.ts";
-import { createThanks, type Thanks } from "../src/thank.ts";
+import { createThanks, type Thanks, type ThanksOutcome } from "../src/thank.ts";
 import { QBittorrentClient } from "../src/qbittorrent.ts";
 import { scanAllTorrents } from "../src/scanner.ts";
 import { createTorrentThanks } from "../src/torrent-thanks.ts";
@@ -194,4 +194,118 @@ void test("a Site that runs out of thanks is left alone for the rest of the scan
     ["capped/1", "open/3"],
     "once a Site says it is out of thanks the scan must stop calling it, and only it",
   );
+});
+
+function scanOf(
+  comments: Map<string, string | null>,
+  verdict: (site: Site, torrentId: string) => ThanksOutcome,
+): { scan: (delayMs: number) => Promise<void>; attempted: { at: number; target: string }[] } {
+  const qbClient = {
+    listTorrents: () =>
+      Promise.resolve([...comments.keys()].map((hash) => ({ hash, name: `Torrent ${hash}` }))),
+    getTorrentComment: (hash: string) => {
+      const comment = comments.get(hash);
+      return comment === null || comment === undefined
+        ? Promise.reject(new Error(`qBittorrent lost ${hash}`))
+        : Promise.resolve(comment);
+    },
+    getTorrentCommentWithRetry: (hash: string) => Promise.resolve(comments.get(hash) ?? ""),
+  };
+  const attempted: { at: number; target: string }[] = [];
+  const thanks: Thanks = {
+    thank: ({ site, torrentId }) => {
+      attempted.push({ at: Date.now(), target: `${site.id}/${torrentId}` });
+      return Promise.resolve(verdict(site, torrentId));
+    },
+    drainAll: () => Promise.resolve(),
+  };
+  const scan = (delayMs: number) =>
+    scanAllTorrents(qbClient, createTorrentThanks(pausableSites(), qbClient, thanks), delayMs);
+  return { scan, attempted };
+}
+
+const tally = async (): Promise<Record<string, number>> => ({
+  thanked: await metricValue("tracker_scan_last_torrents_processed", { result: "thanked" }),
+  skipped: await metricValue("tracker_scan_last_torrents_processed", { result: "skipped" }),
+  error: await metricValue("tracker_scan_last_torrents_processed", { result: "error" }),
+});
+
+void test("a torrent the scan cannot place on a Site is skipped, not an error", async () => {
+  const { scan } = scanOf(
+    new Map([
+      ["h1", ""],
+      ["h2", "https://elsewhere.example.com/torrents/1"],
+      ["h3", "https://capped.example.com/torrents/2"],
+      ["h4", "https://capped.example.com/torrents/3"],
+      ["h5", "https://open.example.com/torrents/4"],
+    ]),
+    (site) =>
+      site.id === "capped"
+        ? { status: "skipped", reason: "quota_exhausted" }
+        : { status: "thanked", detail: "clicked" },
+  );
+
+  await scan(0);
+
+  assert.deepEqual(await tally(), { thanked: 1, skipped: 4, error: 0 });
+});
+
+void test("a Site that skips a torrent for any other reason keeps being called", async () => {
+  const { scan, attempted } = scanOf(
+    new Map([
+      ["h1", "https://capped.example.com/torrents/1"],
+      ["h2", "https://capped.example.com/torrents/2"],
+    ]),
+    (_site, torrentId) =>
+      torrentId === "1"
+        ? { status: "skipped", reason: "already_thanked" }
+        : { status: "thanked", detail: "clicked" },
+  );
+
+  await scan(0);
+
+  assert.deepEqual(
+    attempted.map(({ target }) => target),
+    ["capped/1", "capped/2"],
+  );
+});
+
+void test("a torrent that fails is counted as an error and the scan reported as partial", async () => {
+  const { scan } = scanOf(
+    new Map([
+      ["h1", null],
+      ["h2", "https://open.example.com/torrents/2"],
+    ]),
+    () => ({ status: "thanked", detail: "clicked" }),
+  );
+  const partialBefore = await metricValue("tracker_scans_completed_total", { status: "partial" });
+  const timedBefore = await histogramCount("tracker_scan_duration_seconds");
+
+  await scan(0);
+
+  assert.deepEqual(await tally(), { thanked: 1, skipped: 0, error: 1 });
+  assert.equal(
+    (await metricValue("tracker_scans_completed_total", { status: "partial" })) - partialBefore,
+    1,
+  );
+  assert.equal((await histogramCount("tracker_scan_duration_seconds")) - timedBefore, 1);
+});
+
+void test("only a call to the Site earns the next torrent a delay", async () => {
+  const { scan, attempted } = scanOf(
+    new Map([
+      ["h1", "https://open.example.com/torrents/1"],
+      ["h2", "no site url here"],
+      ["h3", "no site url here either"],
+      ["h4", "https://open.example.com/torrents/4"],
+    ]),
+    () => ({ status: "thanked", detail: "clicked" }),
+  );
+
+  await scan(100);
+
+  const [first, second] = attempted;
+  assert.ok(first && second, "expected two Site calls to compare");
+  const gap = second.at - first.at;
+  assert.ok(gap >= 100 && gap < 200, `expected one 100ms delay between the calls, got ${gap}ms`);
 });

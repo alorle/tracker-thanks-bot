@@ -1,4 +1,4 @@
-import { createServer, type IncomingMessage } from "node:http";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 
 export type FakeTorrent = { name: string; comment: string };
 
@@ -14,6 +14,8 @@ export function startFakeQBittorrent({
   forbidden,
   apiKey,
   emptyCommentAttempts = 0,
+  loginStatus = 200,
+  withoutSid = false,
 }: {
   torrents?: Map<string, FakeTorrent>;
   /** Reject data requests with 403: "once" recovers after a re-login, "always" never does. */
@@ -22,6 +24,8 @@ export function startFakeQBittorrent({
   apiKey?: string;
   /** Serve an empty comment this many times first, as qBittorrent does while it still lacks the metadata. */
   emptyCommentAttempts?: number;
+  loginStatus?: number;
+  withoutSid?: boolean;
 } = {}): Promise<FakeQBittorrent> {
   // torrents: Map<hash, { name, comment }>
   const store = torrents ?? new Map<string, FakeTorrent>();
@@ -36,16 +40,28 @@ export function startFakeQBittorrent({
       ? /(?:^|;\s*)SID=fakesid(?:;|$)/.test(req.headers.cookie ?? "")
       : req.headers.authorization === `Bearer ${apiKey}`;
 
-  const server = createServer((req, res) => {
+  const respond = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     const reqUrl = new URL(req.url ?? "/", "http://127.0.0.1");
     requests.push(reqUrl.pathname);
 
     if (reqUrl.pathname === "/api/v2/auth/login" && req.method === "POST") {
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) chunks.push(chunk as Buffer);
+      const form = new URLSearchParams(Buffer.concat(chunks).toString());
+      const accepted =
+        req.headers["content-type"] === "application/x-www-form-urlencoded" &&
+        form.get("username") === "qbit-user" &&
+        form.get("password") === "qbit-pw";
+      if (loginStatus !== 200) {
+        res.writeHead(loginStatus, { "Content-Type": "text/plain" });
+        res.end("Forbidden");
+        return;
+      }
       res.writeHead(200, {
         "Content-Type": "text/plain",
-        "Set-Cookie": "SID=fakesid; Path=/; HttpOnly",
+        ...(accepted && !withoutSid && { "Set-Cookie": "SID=fakesid; Path=/; HttpOnly" }),
       });
-      res.end("Ok.");
+      res.end(accepted ? "Ok." : "Fails.");
       return;
     }
 
@@ -83,7 +99,9 @@ export function startFakeQBittorrent({
 
     res.writeHead(404, { "Content-Type": "text/plain" });
     res.end("not found");
-  });
+  };
+
+  const server = createServer((req, res) => void respond(req, res));
 
   return new Promise((resolve) => {
     server.listen(0, "127.0.0.1", () => {

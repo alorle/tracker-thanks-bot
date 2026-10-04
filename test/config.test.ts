@@ -277,3 +277,56 @@ void test("an id right at the length limit still loads", (t) => {
   };
   assert.equal(loadSites(path, env).get(id)?.id, id);
 });
+
+void test("every subcommand name is refused as a site id", (t) => {
+  const tmpDir = mkdtempSync(join(tmpdir(), "thanks-bot-config-"));
+  t.after(() => rmSync(tmpDir, { recursive: true, force: true }));
+
+  const reserved = [
+    "serve",
+    "scan",
+    "help",
+    "version",
+    "init",
+    "list",
+    "add",
+    "remove",
+    "login",
+    "test",
+  ];
+  for (const id of reserved) {
+    const path = join(tmpDir, `${id}.json`);
+    writeFileSync(path, JSON.stringify({ sites: [{ id, base_url: "https://a.example.com" }] }));
+    assert.throws(() => loadSites(path, {}), /is reserved/, `expected "${id}" to be refused`);
+  }
+});
+
+void test("a base_url with a path keeps every character of it", (t) => {
+  const tmpDir = mkdtempSync(join(tmpdir(), "thanks-bot-config-"));
+  t.after(() => rmSync(tmpDir, { recursive: true, force: true }));
+  const path = join(tmpDir, "sites.json");
+  writeFileSync(
+    path,
+    JSON.stringify({ sites: [{ id: "nested", base_url: "https://example.com/tracker" }] }),
+  );
+
+  const env = { NESTED_USERNAME: "operator-user", NESTED_PASSWORD: "operator-pw" };
+  assert.equal(loadSites(path, env).get("nested")?.baseUrl, "https://example.com/tracker");
+});
+
+void test("a sites config that cannot be read is not reported as missing", (t) => {
+  const tmpDir = mkdtempSync(join(tmpdir(), "thanks-bot-config-"));
+  t.after(() => rmSync(tmpDir, { recursive: true, force: true }));
+
+  assert.throws(
+    () => loadSites(tmpDir, {}),
+    (err: unknown) => (err as NodeJS.ErrnoException).code === "EISDIR",
+  );
+});
+
+void test("the cache lives next to the sources unless CACHE_DIR moves it", (t) => {
+  const env = configEnv(t);
+
+  assert.equal(loadConfig(env).cacheDir, join(import.meta.dirname, "..", ".cache"));
+  assert.equal(loadConfig({ ...env, CACHE_DIR: "/var/cache/bot" }).cacheDir, "/var/cache/bot");
+});
