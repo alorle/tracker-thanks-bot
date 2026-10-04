@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [2.0.0](https://github.com/alorle/tracker-thanks-bot/compare/v1.2.0...v2.0.0) (2026-10-04)
+
+### ⚠ BREAKING CHANGES
+
+- **thanks:** `THANKS_ENGINE` and the Site field
+  `login_button_selector` are gone and ignored if still set; every Site is
+  thanked over HTTP. The container entrypoint is `node` without tini. The
+  Playwright profiles under `$CACHE_DIR/sessions/` are no longer read and
+  can be deleted by hand.
+
+### Features
+
+- **thanks:** read what the Site said when it refused a thanks ([cf67d0b](https://github.com/alorle/tracker-thanks-bot/commit/cf67d0b7307d444b000163ef65a8c64b75cba89f)), references [#30](https://github.com/alorle/tracker-thanks-bot/issues/30)
+- **thanks:** thank over HTTP only, drop the Playwright engine ([#32](https://github.com/alorle/tracker-thanks-bot/issues/32)) ([b405f26](https://github.com/alorle/tracker-thanks-bot/commit/b405f26c72d65b79cc465a409115fad09911fc15))
+
+### Documentation
+
+- **context:** drop the ambiguity the id consolidation already resolved ([#40](https://github.com/alorle/tracker-thanks-bot/issues/40)) ([0e34e1c](https://github.com/alorle/tracker-thanks-bot/commit/0e34e1cc64507821f5ecb69001c39334a0eafd86))
+- plan how a second torrent client would plug in ([4aa557c](https://github.com/alorle/tracker-thanks-bot/commit/4aa557c1be4fa08dcdbb920befd89e4e0ef68b0a))
+
 ## [1.2.0](https://github.com/alorle/tracker-thanks-bot/compare/v1.1.0...v1.2.0) (2026-09-14)
 
 ### Features
