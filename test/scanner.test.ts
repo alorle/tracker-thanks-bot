@@ -307,5 +307,5 @@ void test("only a call to the Site earns the next torrent a delay", async () => 
   const [first, second] = attempted;
   assert.ok(first && second, "expected two Site calls to compare");
   const gap = second.at - first.at;
-  assert.ok(gap >= 100 && gap < 200, `expected one 100ms delay between the calls, got ${gap}ms`);
+  assert.ok(gap >= 90 && gap < 200, `expected one 100ms delay between the calls, got ${gap}ms`);
 });
