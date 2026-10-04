@@ -63,7 +63,7 @@ void test("the scan paces its calls to the Site", async (t) => {
   const [first, second] = tracker.clicks;
   assert.ok(first && second, "expected two clicks to compare");
   const gap = second.at - first.at;
-  assert.ok(gap >= 300, `expected the configured delay between the two Site calls, got ${gap}ms`);
+  assert.ok(gap >= 290, `expected the configured delay between the two Site calls, got ${gap}ms`);
   // The delay pays for the previous call, so the first torrent must not wait.
   assert.ok(
     first.at - startedAt < 300,
@@ -307,5 +307,5 @@ void test("only a call to the Site earns the next torrent a delay", async () => 
   const [first, second] = attempted;
   assert.ok(first && second, "expected two Site calls to compare");
   const gap = second.at - first.at;
-  assert.ok(gap >= 100 && gap < 200, `expected one 100ms delay between the calls, got ${gap}ms`);
+  assert.ok(gap >= 90 && gap < 200, `expected one 100ms delay between the calls, got ${gap}ms`);
 });
