@@ -37,15 +37,15 @@
     "@commitlint/config-conventional": "^21.2.0",
     "@eslint/js": "^10.0.1",
     "@stryker-mutator/core": "^10.0.0",
-    "@types/node": "^26.5.1",
+    "@types/node": "^26.6.4",
     "commit-and-tag-version": "^13.1.0",
     "eslint": "^10.8.0",
     "eslint-config-prettier": "^10.1.8",
-    "globals": "^17.8.0",
+    "globals": "^17.13.0",
     "husky": "^9.1.7",
     "lint-staged": "^17.2.0",
     "prettier": "^3.9.6",
     "typescript": "^6.0.3",
-    "typescript-eslint": "^8.65.0"
+    "typescript-eslint": "^8.71.0"
   }
 }
