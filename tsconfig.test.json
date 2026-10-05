@@ -8,6 +8,6 @@
     "sourceMap": false,
     "tsBuildInfoFile": "node_modules/.cache/tsconfig.test.tsbuildinfo"
   },
-  "include": ["test/**/*"],
+  "include": ["test/**/*", ".claude/skills/**/*.ts"],
   "references": [{ "path": "./tsconfig.app.json" }]
 }
