@@ -3,6 +3,13 @@ name: Mutation
 on:
   pull_request:
     branches: [main]
+    paths:
+      - "src/**"
+      - "test/**"
+      - stryker.config.mjs
+      - package.json
+      - package-lock.json
+      - .github/workflows/mutation.yml
   schedule:
     # A run from scratch every Monday: pull requests only re-test what changed,
     # and this is what stops that baseline from drifting.
@@ -39,7 +46,7 @@ jobs:
           restore-keys: ${{ runner.os }}-stryker-
 
       - name: Run Stryker
-        run: npm run test:mutation -- ${{ github.event_name == 'pull_request' && '--incremental' || '' }}
+        run: npm run test:mutation -- ${{ github.event_name == 'pull_request' && '--incremental' || '--incremental --force' }}
 
       - name: Summarise the mutation score
         if: always() && hashFiles('reports/mutation/mutation.json') != ''
