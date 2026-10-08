@@ -1,6 +1,6 @@
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig, loadSites } from "../src/config.ts";
@@ -329,4 +329,17 @@ void test("the cache lives next to the sources unless CACHE_DIR moves it", (t) =
 
   assert.equal(loadConfig(env).cacheDir, join(import.meta.dirname, "..", ".cache"));
   assert.equal(loadConfig({ ...env, CACHE_DIR: "/var/cache/bot" }).cacheDir, "/var/cache/bot");
+});
+
+void test("without SITES_CONFIG_PATH the Sites are read from config/sites.json next to the code", (t) => {
+  const expected = join(import.meta.dirname, "..", "config", "sites.json");
+  if (existsSync(expected)) {
+    t.skip("a local config/sites.json would be read instead of reported missing");
+    return;
+  }
+
+  assert.throws(
+    () => loadConfig({}),
+    (err: Error) => err.message.includes(`"${expected}"`),
+  );
 });
