@@ -1,7 +1,7 @@
 import type { Config, Site } from "./config.ts";
 import { classifyRejection, type ClassifyRejection } from "./rejection.ts";
 import { enqueue, drainAll } from "./queue.ts";
-import { createHttpThanks, type ThanksAnswer } from "./http-thanks.ts";
+import { createEngineThanks, type ThanksAnswer } from "./engine.ts";
 import { log } from "./log.ts";
 import { torrentsThanked, torrentsSkipped, torrentsErrored, thankDuration } from "./metrics.ts";
 
@@ -64,7 +64,7 @@ export function createThanks(
   config: Config,
   classify: ClassifyRejection = classifyRejection,
 ): Thanks {
-  const thankOverHttp = createHttpThanks(config.cacheDir);
+  const thankOnSite = createEngineThanks(config.cacheDir);
 
   /**
    * Thank one torrent, serialized per Site.
@@ -76,7 +76,7 @@ export function createThanks(
     return enqueue(site.id, async () => {
       const stopTimer = thankDuration.startTimer({ site: site.id });
       try {
-        const outcome = await place(await thankOverHttp(torrentId, site, logPrefix), classify);
+        const outcome = await place(await thankOnSite(torrentId, site, logPrefix), classify);
         record(outcome, site, torrentId, logPrefix);
         return outcome;
       } catch (err) {

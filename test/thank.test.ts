@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig, type Config, type Site } from "../src/config.ts";
 import { createThanks } from "../src/thank.ts";
-import { findThankButton, ThanksRefusedAsInvalidError } from "../src/http-thanks.ts";
+import { findThankButton, ThanksRefusedAsInvalidError } from "../src/engine.ts";
 import { startFakeTracker } from "./fake-tracker.ts";
 import { histogramCount, metricValue } from "./metric-probe.ts";
 

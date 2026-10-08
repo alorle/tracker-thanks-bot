@@ -1,4 +1,5 @@
 import type { Site, SitesMap } from "./config.ts";
+import { torrentIdIn } from "./engine.ts";
 import type { QBittorrentClient } from "./qbittorrent.ts";
 import type { ThankTarget, Thanks, ThanksOutcome } from "./thank.ts";
 
@@ -17,11 +18,9 @@ type CommentSource = Pick<QBittorrentClient, "getTorrentComment" | "getTorrentCo
 
 function matchSite(sites: SitesMap, comment: string): ThankTarget | null {
   for (const site of sites.values()) {
-    const escaped = site.baseUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const pattern = new RegExp(`${escaped}/torrents/(\\d+)`);
-    const match = comment.match(pattern);
-    if (match?.[1]) {
-      return { site, torrentId: match[1] };
+    const torrentId = torrentIdIn(comment, site);
+    if (torrentId) {
+      return { site, torrentId };
     }
   }
   return null;
