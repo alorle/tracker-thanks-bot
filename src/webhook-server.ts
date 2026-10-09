@@ -11,6 +11,11 @@ const SHUTDOWN_TIMEOUT_MS = 30_000;
 // Radarr/Sonarr Grab payloads are a few KB; anything past this is not one.
 const MAX_BODY_BYTES = 256 * 1024;
 
+type Host = {
+  on: (signal: "SIGINT" | "SIGTERM", listener: () => void) => unknown;
+  exit: (code: number) => void;
+};
+
 // Radarr/Sonarr webhook payload (only fields we use)
 type WebhookPayload = {
   eventType?: string;
@@ -135,12 +140,17 @@ async function processGrab(
   log(PREFIX, `[${source}] Done processing "${title}" (${site.id} torrent ${torrentId}).`);
 }
 
-async function gracefulShutdown(signal: string, server: Server, thanks: Thanks): Promise<void> {
+async function gracefulShutdown(
+  signal: string,
+  server: Server,
+  thanks: Thanks,
+  host: Host,
+): Promise<void> {
   log(PREFIX, `${signal} received, draining (timeout ${SHUTDOWN_TIMEOUT_MS / 1000}s)...`);
 
   const forceExit = setTimeout(() => {
     log(PREFIX, "Shutdown timeout exceeded, forcing exit.");
-    process.exit(1);
+    host.exit(1);
   }, SHUTDOWN_TIMEOUT_MS);
   forceExit.unref();
 
@@ -149,10 +159,10 @@ async function gracefulShutdown(signal: string, server: Server, thanks: Thanks):
     log(PREFIX, "HTTP server closed. Draining in-flight thank tasks...");
     await thanks.drainAll();
     log(PREFIX, "Shutdown complete.");
-    process.exit(0);
+    host.exit(0);
   } catch (err) {
     log(PREFIX, `Error during shutdown: ${String(err)}`);
-    process.exit(1);
+    host.exit(1);
   }
 }
 
@@ -160,6 +170,7 @@ export async function startServer(
   webhook: Config["webhook"],
   thankTorrent: TorrentThanks,
   thanks: Thanks,
+  host: Host = process,
 ): Promise<Server> {
   const { port, secret: webhookSecret } = webhook;
   if (!webhookSecret) {
@@ -209,13 +220,14 @@ export async function startServer(
   const onSignal = (signal: string) => {
     if (shuttingDown) {
       log(PREFIX, `${signal} received again, forcing exit.`);
-      process.exit(1);
+      host.exit(1);
+      return;
     }
     shuttingDown = true;
-    void gracefulShutdown(signal, server, thanks);
+    void gracefulShutdown(signal, server, thanks, host);
   };
-  process.on("SIGINT", () => onSignal("SIGINT"));
-  process.on("SIGTERM", () => onSignal("SIGTERM"));
+  host.on("SIGINT", () => onSignal("SIGINT"));
+  host.on("SIGTERM", () => onSignal("SIGTERM"));
 
   await new Promise<void>((resolve) => {
     server.listen(port, () => {

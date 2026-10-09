@@ -1,5 +1,6 @@
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import { setTimeout as sleep } from "node:timers/promises";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -427,4 +428,69 @@ void test("each endpoint answers only its own method and path", async (t) => {
     const response = await fetch(`${base}${path}`, { method });
     assert.equal(response.status, 404, `expected ${method} ${path} to be a 404`);
   }
+});
+
+async function serveUntilSignalled(t: TestContext, drainAll: () => Promise<void>) {
+  const signals = new EventEmitter();
+  const exits: number[] = [];
+  const server = await startServer(
+    { port: 0, secret: null },
+    () => Promise.resolve({ status: "no_comment" }),
+    { thank: () => Promise.reject(new Error("the webhook never thanks directly")), drainAll },
+    { on: (signal, listener) => signals.on(signal, listener), exit: (code) => exits.push(code) },
+  );
+  t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
+  return { server, signals, exits };
+}
+
+const settle = () => new Promise((resolve) => setImmediate(resolve));
+
+void test("SIGTERM closes the port and exits cleanly once in-flight Thanks have drained", async (t) => {
+  let drained!: () => void;
+  const { server, signals, exits } = await serveUntilSignalled(
+    t,
+    () => new Promise<void>((resolve) => (drained = resolve)),
+  );
+
+  signals.emit("SIGTERM");
+  await waitFor(() => !server.listening, "the port must close as soon as shutdown starts");
+  await settle();
+  assert.deepEqual(exits, [], "the process must wait for the queued Thanks");
+
+  drained();
+  await waitFor(() => exits.length > 0, "the process must exit once drained");
+  assert.deepEqual(exits, [0]);
+});
+
+void test("a drain that fails exits with an error", async (t) => {
+  const { signals, exits } = await serveUntilSignalled(t, () =>
+    Promise.reject(new Error("queue blew up")),
+  );
+
+  signals.emit("SIGINT");
+  await waitFor(() => exits.length > 0, "the process must exit when draining fails");
+  assert.deepEqual(exits, [1]);
+});
+
+void test("a second signal during shutdown forces the exit", async (t) => {
+  const { signals, exits } = await serveUntilSignalled(t, () => new Promise<void>(() => {}));
+
+  signals.emit("SIGINT");
+  await settle();
+  assert.deepEqual(exits, []);
+
+  signals.emit("SIGTERM");
+  assert.deepEqual(exits, [1]);
+});
+
+void test("a drain that never ends is cut off after thirty seconds", async (t) => {
+  const { signals, exits } = await serveUntilSignalled(t, () => new Promise<void>(() => {}));
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+
+  signals.emit("SIGTERM");
+  t.mock.timers.tick(29_999);
+  assert.deepEqual(exits, []);
+
+  t.mock.timers.tick(1);
+  assert.deepEqual(exits, [1]);
 });
