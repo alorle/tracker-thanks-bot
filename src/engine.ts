@@ -34,6 +34,11 @@ export type ThanksAnswer =
   | { status: "skipped"; reason: "no_button" | "already_thanked" }
   | { status: "refused"; message: string };
 
+export function torrentIdIn(text: string, site: Site): string | null {
+  const escaped = site.baseUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`${escaped}/torrents/(\\d+)`).exec(text)?.[1] ?? null;
+}
+
 type Jar = Map<string, string>;
 type RequestInit = {
   method?: string;
@@ -286,7 +291,7 @@ async function callStore(
   return null;
 }
 
-export function createHttpThanks(
+export function createEngineThanks(
   cacheDir: string,
 ): (torrentId: string, site: Site, logPrefix: string) => Promise<ThanksAnswer> {
   const jars = new Map<string, Jar>();
@@ -317,7 +322,7 @@ export function createHttpThanks(
     writeFileSync(path, JSON.stringify(Object.fromEntries(jar)), { mode: 0o600 });
   }
 
-  return async function thankTorrentHttp(torrentId, site, logPrefix) {
+  return async function thankTorrent(torrentId, site, logPrefix) {
     const jar = loadJar(site.id);
 
     try {
